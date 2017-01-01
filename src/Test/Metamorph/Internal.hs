@@ -231,11 +231,11 @@ instance (PrettyTrace trace, PrettyRetrace_ retrace)
   prettyRetrace_ (RetraceFun f) = f
     (\t cxt ->
       prettyTrace t $
-        showParen True (cxt (showString "* -> _")))
+        showBkt (cxt (showString "* -> _")))
     (\rt cxt ->
       prettyRetrace_ rt (cxt . (showString "_ -> " .)))
     where
-      funPrec = 0
+      showBkt s = showString "[" . s . showString "]"
 
 instance PrettyRetrace_ Void where
   prettyRetrace_ (Void f) = f
