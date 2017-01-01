@@ -38,6 +38,9 @@ data TraceEnd = TraceEnd
 type family Trace a :: *
 type instance Trace (a -> b) = TraceFun a (Trace b)
 type instance Trace () = TraceSimple "()" '[]
+type instance Trace Bool = TraceSimple "Bool" '[]
+type instance Trace Integer = TraceSimple "Integer" '[]
+type instance Trace Int = TraceSimple "Int" '[]
 type instance Trace (a, b) = TraceSimple "(,)" '[
   '("fst", Trace a),
   '("snd", Trace b)]
@@ -63,14 +66,14 @@ instance PrettySum as
 instance PrettySum '[] where
   prettySum (TagEmpty s) = s
 
--- trace<b> (unCons (...))
+-- <trace> (unCons (...))
 instance (KnownSymbol n, PrettyTrace a, PrettySum as)
   => PrettySum ('(n, a) ': as) where
   prettySum (TagPlus f) = prettySum . f $ \ta s ->
     prettyTrace ta . showParen True $
       showString (symbolVal' @n proxy#) . showString " " . s
 
--- trace<b> ((...) a)
+-- <trace> ((...) a)
 instance (Show a, PrettyTrace trace)
   => PrettyTrace (TraceFun a trace) where
   prettyTrace (TraceFun f) = f $ \a tb s ->
@@ -79,7 +82,7 @@ instance (Show a, PrettyTrace trace)
       showString " " .
       showsPrec 11 a
 
--- trace<a> ((...) !! n)
+-- <trace> ((...) !! n)
 instance PrettyTrace trace
   => PrettyTrace (TraceList trace) where
   prettyTrace (TraceList f) = f $ \n ta s ->
@@ -123,6 +126,15 @@ instance (Splittable m a, Traceable z m b)
 
 instance Applicative m => Traceable z m () where
   trace _ = pure ()
+
+instance Traceable z Gen Bool where
+  trace _ = arbitrary
+
+instance Traceable z Gen Integer where
+  trace _ = arbitrary
+
+instance Traceable z Gen Int where
+  trace _ = arbitrary
 
 instance (Applicative m, Traceable z m a, Traceable z m b)
   => Traceable z m (a, b) where
@@ -218,7 +230,13 @@ newtype Void = Void (forall r. r)
 
 type family Retrace_ a :: *
 type instance Retrace_ (a -> b) = RetraceFun (Trace a) (Retrace_ b)
+type instance Retrace_ () = Void
 type instance Retrace_ Bool = Void
+type instance Retrace_ Integer = Void
+type instance Retrace_ Int = Void
+type instance Retrace_ (_, _) = Void
+type instance Retrace_ (Either _ _) = Void
+type instance Retrace_ (Maybe _) = Void
 type instance Retrace_ [c] = Void
 type instance Retrace_ (Retrace a) = Void
 
@@ -264,7 +282,13 @@ instance (Newtype a, CoArbitrary (Retrace_ (Old a)))
 
 type family Untrace a :: *
 type instance Untrace (a -> b) = Untrace b
+type instance Untrace () = ()
 type instance Untrace Bool = Bool
+type instance Untrace Integer = Integer
+type instance Untrace Int = Int
+type instance Untrace (a, b) = (a, b)
+type instance Untrace (Either a b) = Either a b
+type instance Untrace (Maybe a) = Maybe a
 type instance Untrace [a] = [a]  -- Could be more general.
 type instance Untrace (Retrace a) = Retrace a
 
@@ -277,11 +301,29 @@ instance (Monad m, Traceable z m a, RunTrace z m b)
     a <- trace @z @m @a (\ta ret -> ret (k (RetraceFun $ \k _ -> k ta)))
     runtrace' (k . \rtb -> RetraceFun $ \_ k -> k rtb) (f a)
 
+instance Applicative m => RunTrace z m () where
+  runtrace' _ = pure
+
 instance Applicative m => RunTrace z m Bool where
-  runtrace' _ b = pure b
+  runtrace' _ = pure
+
+instance Applicative m => RunTrace z m Integer where
+  runtrace' _ = pure
+
+instance Applicative m => RunTrace z m Int where
+  runtrace' _ = pure
+
+instance Applicative m => RunTrace z m (a, b) where
+  runtrace' _ = pure
+
+instance Applicative m => RunTrace z m (Either a b) where
+  runtrace' _ = pure
+
+instance Applicative m => RunTrace z m (Maybe a) where
+  runtrace' _ = pure
 
 instance Applicative m => RunTrace z m [c] where
-  runtrace' _ cs = pure cs
+  runtrace' _ = pure
 
 instance Applicative m => RunTrace z m (Retrace a) where
   runtrace' _ a = pure a
