@@ -16,8 +16,8 @@ description:
   Observing the image of a single list is sufficient to determine whether @f@
   is correct for all lists of the same length.
   .
-  @metamorph@ systematically computes the Right Type™ to test a property
-  with as few redundant test cases as possible, just by looking at its type.
+  @metamorph@ systematically computes the Right™ set of test cases for a
+  property, just by looking at its type.
   .
   Based on ideas from the paper /Testing Polymorphic Properties/,
   Jean-Philippe Bernardy, Patrik Jansson, and Koen Claessen, ESOP'10.

@@ -155,7 +155,8 @@ instance PrettyTrace trace
       showString "[" .
       shows n .
       showString "=" .
-      prettyTrace trace))
+      prettyTrace trace .
+      showString "]"))
 
 class PrettyTraceSimple ns as where
   prettyTraceSimple :: SumProduct ShowS as -> ShowS
