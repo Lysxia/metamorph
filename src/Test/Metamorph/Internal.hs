@@ -1,17 +1,15 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
-{-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MagicHash #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
-{-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 module Test.Metamorph.Internal where
 
@@ -48,6 +46,7 @@ type instance Trace (Either a b) = TraceSimple "Either" '[
   '("fromRight", Trace b)]
 type instance Trace (Maybe a) = TraceSimple "Maybe" '[ '("fromJust", Trace a) ]
 type instance Trace [a] = TraceList (Trace a)
+type instance Trace (Retrace a) = TraceEnd
 
 -- * Showing traces.
 
@@ -153,21 +152,9 @@ traceList n cs =
   where
     fa ta = TraceList $ \k -> k n ta
 
--- | @Traceable@ implementation for the monomorphic type(s) associated with
--- a type function @F@.
---
--- @
--- newtype A = A (Retrace (F A))
---
--- type instance Trace A = TraceEnd
---
--- instance Applicative m => Traceable (Retrace (F A)) m A where
---   trace = traceEnd A
--- @
-traceEnd
-  :: (Applicative m, Trace a ~ TraceEnd)
-  => (z -> a) -> (forall r. Trace a -> (z -> a) -> a) -> m a
-traceEnd wrap cs = pure (cs TraceEnd wrap)
+instance (Applicative m, Newtype a, Retrace_ (Old a) ~ z)
+  => Traceable z m (Retrace a) where
+  trace cs = pure (cs TraceEnd Retrace)
 
 autotag :: forall n1 a1 n0 as. Autotag n1 a1 as => a1 -> TraceSimple n0 as
 autotag a = TraceSimple (autotag' @n1 a)
@@ -226,54 +213,79 @@ instance CoArbitrary TraceEnd where
 
 -- * Retrace
 
-data family Retrace a :: *
-newtype instance Retrace (a -> b) = RFun (forall r. Sum r '[ Trace a, Retrace b ])
-newtype instance Retrace Bool = RBool (forall r. Sum r '[])
+newtype RetraceFun trace retrace = RetraceFun (forall r. Sum r '[ trace, retrace ])
+newtype Void = Void (forall r. r)
 
-class PrettyRetrace t where
-  prettyRetrace :: Retrace t -> (ShowS -> ShowS) -> ShowS
+type family Retrace_ a :: *
+type instance Retrace_ (a -> b) = RetraceFun (Trace a) (Retrace_ b)
+type instance Retrace_ Bool = Void
+type instance Retrace_ (Retrace a) = Void
 
-instance (PrettyTrace (Trace a), PrettyRetrace b)
-  => PrettyRetrace (a -> b) where
-  prettyRetrace (RFun f) = f
-    (\ta cxt ->
-      prettyTrace ta $
+newtype Retrace a = Retrace (Retrace_ (Old a))
+
+class PrettyRetrace_ t where
+  prettyRetrace_ :: t -> (ShowS -> ShowS) -> ShowS
+
+instance (PrettyTrace trace, PrettyRetrace_ retrace)
+  => PrettyRetrace_ (RetraceFun trace retrace) where
+  prettyRetrace_ (RetraceFun f) = f
+    (\t cxt ->
+      prettyTrace t $
         showParen True (cxt (showString "* -> _")))
-    (\rtb cxt ->
-      prettyRetrace rtb (cxt . (showString "_ -> " .)))
+    (\rt cxt ->
+      prettyRetrace_ rt (cxt . (showString "_ -> " .)))
     where
       funPrec = 0
 
-instance PrettyRetrace a => Show (Retrace a) where
-  showsPrec _ a = prettyRetrace a id
+instance PrettyRetrace_ Void where
+  prettyRetrace_ (Void f) = f
 
-class CoArbitraryRetrace a where
-  car :: Retrace a -> Gen b -> Gen b
+instance (Newtype a, PrettyRetrace_ (Retrace_ (Old a)))
+  => Show (Retrace a) where
+  showsPrec _ (Retrace a) = prettyRetrace_ a id
 
-instance (CoArbitrary (Trace a), CoArbitraryRetrace b)
-  => CoArbitraryRetrace (a -> b) where
-  car (RFun f) = f coarbitrary car
+instance (PrettyTrace trace, PrettyRetrace_ retrace)
+  => Show (RetraceFun trace retrace) where
+  showsPrec _ a = prettyRetrace_ a id
 
-instance CoArbitraryRetrace Bool where
-  car (RBool r) = r
+instance (CoArbitrary trace, CoArbitrary retrace)
+  => CoArbitrary (RetraceFun trace retrace) where
+  coarbitrary (RetraceFun f) = f coarbitrary coarbitrary
+
+instance CoArbitrary Void where
+  coarbitrary (Void r) = r
+
+instance (Newtype a, CoArbitrary (Retrace_ (Old a)))
+  => CoArbitrary (Retrace a) where
+  coarbitrary (Retrace a) = coarbitrary a
 
 -- * Untrace
 
 type family Untrace a :: *
 type instance Untrace (a -> b) = Untrace b
 type instance Untrace Bool = Bool
+type instance Untrace (Retrace a) = Retrace a
 
 class RunTrace z m a where
-  runtrace' :: (Retrace a -> z) -> a -> m (Untrace a)
+  runtrace' :: (Retrace_ a -> z) -> a -> m (Untrace a)
 
 instance (Monad m, Traceable z m a, RunTrace z m b)
   => RunTrace z m (a -> b) where
   runtrace' k f = do
-    a <- trace @z @m @a (\ta ret -> ret (k (RFun $ \k _ -> k ta)))
-    runtrace' (k . \rtb -> RFun $ \_ k -> k rtb) (f a)
+    a <- trace @z @m @a (\ta ret -> ret (k (RetraceFun $ \k _ -> k ta)))
+    runtrace' (k . \rtb -> RetraceFun $ \_ k -> k rtb) (f a)
 
 instance Applicative m => RunTrace z m Bool where
   runtrace' _ b = pure b
 
-runtrace :: RunTrace (Retrace a) m a => a -> m (Untrace a)
+instance Applicative m => RunTrace z m (Retrace a) where
+  runtrace' _ a = pure a
+
+runtrace :: RunTrace (Retrace_ a) m a => a -> m (Untrace a)
 runtrace = runtrace' id
+
+-- | Forgetting this may make the compiler hang!
+class Newtype n where
+  type Old n :: *
+  unwrap :: n -> Old n
+

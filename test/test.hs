@@ -1,5 +1,6 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TypeApplications #-}
@@ -11,44 +12,18 @@ import Test.Metamorph
 
 type F a = a -> (a -> a) -> a
 
-type Z = Retrace (F A)
+newtype A = A (F (Retrace A))
+type Z = Retrace A
 
-newtype A = A Z
-
-instance Show A where
-  showsPrec n (A z) = showParen True $
-    showsPrec 11 z . showString " :: A"
-
-instance CoArbitrary A where
-  coarbitrary (A z) = car z
-
--- | Void type.
-newtype instance Retrace A = RetraceA (forall r. Sum r '[])
-
--- | Void instance.
-instance PrettyRetrace A where
-  prettyRetrace (RetraceA f) = f
-
--- | Void instance.
-instance CoArbitraryRetrace A where
-  car (RetraceA f) = f
-
-type instance Trace A = TraceEnd
-
-instance Applicative m => Traceable Z m A where
-  trace = traceEnd A
-
-type instance Untrace A = A
-
-instance Applicative m => RunTrace z m A where
-  runtrace' _ a = pure a
-
-generateA :: (forall a. F a) -> Gen A
-generateA = runtrace @(F A)
+instance Newtype A where
+  type Old A = F Z
+  unwrap (A a) = a
 
 f :: forall a. F a
 f a g = g a
 
 main = do
-  generate (runtrace (f @A)) >>= print
-  print (runIdentity (runtrace (f @A)))
+  -- Gen
+  generate (runtrace (f @Z)) >>= print
+  -- Identity
+  print (runIdentity (runtrace (f @Z)))
