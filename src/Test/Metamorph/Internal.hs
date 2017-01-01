@@ -77,7 +77,7 @@ instance (Show a, PrettyTrace trace)
     prettyTrace tb . showParen True $
       s .
       showString " " .
-      shows a
+      showsPrec 11 a
 
 -- trace<a> ((...) !! n)
 instance PrettyTrace trace
@@ -219,6 +219,7 @@ newtype Void = Void (forall r. r)
 type family Retrace_ a :: *
 type instance Retrace_ (a -> b) = RetraceFun (Trace a) (Retrace_ b)
 type instance Retrace_ Bool = Void
+type instance Retrace_ [c] = Void
 type instance Retrace_ (Retrace a) = Void
 
 newtype Retrace a = Retrace (Retrace_ (Old a))
@@ -264,6 +265,7 @@ instance (Newtype a, CoArbitrary (Retrace_ (Old a)))
 type family Untrace a :: *
 type instance Untrace (a -> b) = Untrace b
 type instance Untrace Bool = Bool
+type instance Untrace [a] = [a]  -- Could be more general.
 type instance Untrace (Retrace a) = Retrace a
 
 class RunTrace z m a where
@@ -277,6 +279,9 @@ instance (Monad m, Traceable z m a, RunTrace z m b)
 
 instance Applicative m => RunTrace z m Bool where
   runtrace' _ b = pure b
+
+instance Applicative m => RunTrace z m [c] where
+  runtrace' _ cs = pure cs
 
 instance Applicative m => RunTrace z m (Retrace a) where
   runtrace' _ a = pure a
