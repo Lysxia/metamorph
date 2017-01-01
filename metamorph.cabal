@@ -1,0 +1,45 @@
+name:                metamorph
+version:             0.1.0.0
+synopsis:
+  Monomorphize polymorphic properties
+description:
+  Given a polymorphic property or function, find a monomorphic instance such
+  that correctness for that instance implies correctness for all other
+  instances.
+  .
+  With some types, the testing space becomes ridiculously small.
+  For example, a function with type:
+  .
+  > f :: forall a. [a] -> [a]
+  .
+  is fully determined by its behavior on lists @[1 .. n]@.
+  Observing the image of a single list is sufficient to determine whether @f@
+  is correct for all lists of the same length.
+  .
+  @metamorph@ systematically computes the Right Type™ to test a property
+  with as few redundant test cases as possible, just by looking at its type.
+  .
+  Based on ideas from the paper /Testing Polymorphic Properties/,
+  Jean-Philippe Bernardy, Patrik Jansson, and Koen Claessen, ESOP'10.
+homepage:            https://github.com/Lysxia/metamorph#readme
+license:             MIT
+license-file:        LICENSE
+author:              Li-yao Xia
+maintainer:          lysxia@gmail.com
+category:            Generics, Testing
+build-type:          Simple
+extra-source-files:  README.md
+cabal-version:       >=1.10
+
+library
+  hs-source-dirs:      src
+  exposed-modules:
+    Test.Metamorph.Internal
+  build-depends:
+    base >= 4.9 && < 5,
+    QuickCheck
+  default-language:    Haskell2010
+
+source-repository head
+  type:     git
+  location: https://github.com/Lysxia/metamorph
