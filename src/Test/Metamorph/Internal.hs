@@ -16,6 +16,7 @@
 module Test.Metamorph.Internal where
 
 import Control.Applicative
+import Data.Functor.Identity
 import Data.List (stripPrefix)
 import GHC.Exts (Constraint, proxy#)
 import GHC.TypeLits
@@ -104,6 +105,9 @@ infixl 3 ?
 
 instance CoArbitrary a => Splittable Gen a where
   split f = MkGen $ \g n a -> unGen (coarbitrary a (f a)) g n
+
+instance Splittable Identity a where
+  split f = pure (runIdentity . f)
 
 instance Select Gen where
   ma ? mb = arbitrary >>= \b -> if b then ma else mb
@@ -253,3 +257,23 @@ instance (CoArbitrary (Trace a), CoArbitraryRetrace b)
 instance CoArbitraryRetrace Bool where
   car (RBool r) = r
 
+-- * Untrace
+
+type family Untrace a :: *
+type instance Untrace (a -> b) = Untrace b
+type instance Untrace Bool = Bool
+
+class RunTrace z m a where
+  runtrace' :: (Retrace a -> z) -> a -> m (Untrace a)
+
+instance (Monad m, Traceable z m a, RunTrace z m b)
+  => RunTrace z m (a -> b) where
+  runtrace' k f = do
+    a <- trace @z @m @a (\ta ret -> ret (k (RFun $ \k _ -> k ta)))
+    runtrace' (k . \rtb -> RFun $ \_ k -> k rtb) (f a)
+
+instance Applicative m => RunTrace z m Bool where
+  runtrace' _ b = pure b
+
+runtrace :: RunTrace (Retrace a) m a => a -> m (Untrace a)
+runtrace = runtrace' id

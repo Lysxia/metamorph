@@ -5,6 +5,7 @@
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 
+import Data.Functor.Identity
 import Test.QuickCheck
 import Test.Metamorph
 
@@ -21,11 +22,14 @@ instance Show A where
 instance CoArbitrary A where
   coarbitrary (A z) = car z
 
+-- | Void type.
 newtype instance Retrace A = RetraceA (forall r. Sum r '[])
 
+-- | Void instance.
 instance PrettyRetrace A where
   prettyRetrace (RetraceA f) = f
 
+-- | Void instance.
 instance CoArbitraryRetrace A where
   car (RetraceA f) = f
 
@@ -34,13 +38,17 @@ type instance Trace A = TraceEnd
 instance Applicative m => Traceable Z m A where
   trace = traceEnd A
 
+type instance Untrace A = A
+
+instance Applicative m => RunTrace z m A where
+  runtrace' _ a = pure a
+
 generateA :: (forall a. F a) -> Gen A
-generateA f = do
-  a0 <- trace @Z @Gen @A (\ta ret -> ret (RFun $ \k _ -> k ta))
-  a1 <- trace @Z @Gen @(A -> A) (\ta1 ret -> ret (RFun $ \_ k -> k (RFun $ \k _ -> k ta1)))
-  pure (f a0 a1)
+generateA = runtrace @(F A)
 
 f :: forall a. F a
 f a g = g a
 
-main = generate (generateA f) >>= print
+main = do
+  generate (runtrace (f @A)) >>= print
+  print (runIdentity (runtrace (f @A)))
