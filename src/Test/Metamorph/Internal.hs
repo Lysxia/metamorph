@@ -4,6 +4,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE InstanceSigs #-}
 {-# LANGUAGE MagicHash #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE PatternSynonyms #-}
@@ -13,6 +14,7 @@
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilyDependencies #-}
 {-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 module Test.Metamorph.Internal where
 
@@ -40,18 +42,21 @@ type family SumProduct r (as :: [[*]]) :: * where
 
 type SumProduct' as = forall r. SumProduct r as
 
-type family SumMono r (as :: [(Symbol, [*])]) :: * where
-  SumMono r '[] = r
-  SumMono r ('(aName, a) ': as) = MonoCont aName r a -> SumMono r as
+type family SumMono r (names :: [Symbol]) (as :: [[*]]) :: * where
+  SumMono r '[] '[] = r
+  SumMono r (aName ': aNames) (a ': as) = MonoCont aName r a -> SumMono r aNames as
 
-newtype SumMono_ r as = SumMono_ (SumMono r as)
+newtype SumMono_ r names as = SumMono_ (SumMono r names as)
 
 -- | Polynomial: sum of monomials.
-newtype Poly (name :: Symbol) as = Poly (forall r. SumMono_ r as)
+newtype Poly' (name :: Symbol) (aNames :: [Symbol]) as
+  = Poly (forall r. SumMono_ r aNames as)
 
-type family Sum r (as :: [*]) :: *
-type instance Sum r '[] = r
-type instance Sum r (a ': as) = (a -> r) -> Sum r as
+type Poly name as = Poly' name (MapFst as) (MapSnd as)
+
+type family Sum r (as :: [*]) :: * where
+  Sum r '[] = r
+  Sum r (a ': as) = (a -> r) -> Sum r as
 
 type family Trace a :: *
 type instance Trace (a -> b) = Poly "(->)" '[ '("<fun>", '[ a, Trace b ]) ]
@@ -73,13 +78,13 @@ type family MapFst (as :: [(k1, k2)]) :: [k1] where
   MapFst '[] = '[]
   MapFst ('(a, _) ': as) = a ': MapFst as
 
-unPoly :: forall r as name. Poly name as -> SumProduct r (MapSnd as)
+unPoly :: forall r names as name. Poly' name names as -> SumProduct r as
 unPoly = unsafeCoerce
 
 mkTrace
-  :: forall a name as
-  .  (Trace a ~ Poly name as)
-  => (forall r. SumProduct r (MapSnd as)) -> Trace a
+  :: forall a name names as
+  .  (Trace a ~ Poly' name names as)
+  => (forall r. SumProduct r as) -> Trace a
 mkTrace = unsafeCoerce
 
 -----------
@@ -89,57 +94,62 @@ mkTrace = unsafeCoerce
 -- Assuming additionally that
 -- Coercible (f r) (g r) => Coercible (forall r. f r) (forall r. g r)
 mkTraceCheck
-  :: forall name as
-  .  (Reify2 as)
-  => (forall r. SumProduct r (MapSnd as)) -> Poly name as
+  :: forall name names as
+  .  (Reify2 names as)
+  => (forall r. SumProduct r as) -> Poly' name names as
 mkTraceCheck s = Poly (
-  (case rr @r @as reify2
-    :: Coercer (SumProduct r (MapSnd as)) (SumMono_ r as)
+  (case rr @r @names @as reify2
+    :: Coercer (SumProduct r as) (SumMono_ r names as)
   of
-    C -> coerce (s @r :: SumProduct r (MapSnd as))
-  ) :: forall r. SumMono_ r as)
+    C -> coerce (s @r :: SumProduct r as)
+  ) :: forall r. SumMono_ r names as)
 
 data Coercer a b where
   C :: Coercible a b => Coercer a b
 
-rr :: forall r as. R2 as -> Coercer (SumProduct r (MapSnd as)) (SumMono_ r as)
+rr :: forall r names as. R2 names as -> Coercer (SumProduct r as) (SumMono_ r names as)
 rr RN = C
 rr (RC reify) = case rr @r reify of
   C -> C
 
-data R2 :: [(k1, k2)] -> * where
-  RN :: R2 '[]
-  RC :: R2 as -> R2 ('(x, y) ': as)
+data R2 :: [k1] -> [k2] -> * where
+  RN :: R2 '[] '[]
+  RC :: R2 xs ys -> R2 (x ': xs) (y ': ys)
 
-class Reify2 (a :: [(k1, k2)]) where
-  reify2 :: R2 a
+class Reify2 (a1 :: [k1]) (a2 :: [k2]) where
+  reify2 :: R2 a1 a2
 
-instance Reify2 '[] where
+instance Reify2 '[] '[] where
   reify2 = RN
 
-instance Reify2 as => Reify2 ('(x, y) ': as) where
+instance Reify2 xs ys => Reify2 (x ': xs) (y ': ys) where
   reify2 = RC reify2
 
 -----------
 
+instance PrettyTrace (Poly' name ns as)
+  => Show (Poly' name ns as) where
+  showsPrec _n = prettyTrace
+
 class PrettyTrace poly where
   prettyTrace :: poly -> ShowS
 
-instance {-# OVERLAPPABLE #-} PrettyTraceSimple as
-  => PrettyTrace (Poly name as) where
-  prettyTrace poly = prettyTraceSimple @as (unPoly @ShowS poly)
+instance {-# OVERLAPPABLE #-} PrettyTraceSimple ns as
+  => PrettyTrace (Poly' name ns as) where
+  prettyTrace poly = prettyTraceSimple @ns @as (unPoly @ShowS poly)
 
 instance (Show a, PrettyTrace trace)
-  => PrettyTrace (Poly "(->)" '[ '("<fun>", '[ a, trace ]) ]) where
+  => PrettyTrace (Poly' "(->)" '["<fun>"] '[ '[ a, trace ] ]) where
   prettyTrace (Poly (SumMono_ poly)) =
     poly (MonoCont (\a trace ->
       showString "(\\" .
       showsPrec 11 a .
+      showString " -> " .
       prettyTrace trace .
       showString ")"))
 
 instance PrettyTrace trace
-  => PrettyTrace (Poly "[]" '[ '("<list>", '[ Int, trace ]) ]) where
+  => PrettyTrace (Poly' "[]" '["<list>"] '[ '[ Int, trace ] ]) where
   prettyTrace (Poly (SumMono_ poly)) =
     poly (MonoCont (\n trace ->
       showString "[" .
@@ -147,17 +157,17 @@ instance PrettyTrace trace
       showString "=" .
       prettyTrace trace))
 
-class PrettyTraceSimple as where
-  prettyTraceSimple :: SumProduct ShowS (MapSnd as) -> ShowS
+class PrettyTraceSimple ns as where
+  prettyTraceSimple :: SumProduct ShowS as -> ShowS
 
-instance PrettyTraceSimple '[] where
+instance PrettyTraceSimple '[] '[] where
   prettyTraceSimple s = s
 
-instance (KnownSymbol name, PrettyTrace a, PrettyTraceSimple as)
-  => PrettyTraceSimple ('(name, '[a]) ': as) where
+instance (KnownSymbol name, PrettyTrace a, PrettyTraceSimple names as)
+  => PrettyTraceSimple (name ': names) ('[a] ': as) where
   prettyTraceSimple s =
     showString "(" .
-    prettyTraceSimple @as
+    prettyTraceSimple @names @as
       (s (\a -> replace "{_}" (prettyTrace a) rootExpr)) .
     showString ")"
     where
@@ -252,23 +262,99 @@ data family Retrace r a :: *
 newtype instance Retrace r (a -> b) = RFun (Sum r '[ Trace a, Retrace r b ])
 newtype instance Retrace r Bool = RBool (Sum r '[])
 
+instance (Show (Trace a), Show (Retrace ShowS b))
+  => Show (Retrace ShowS (a -> b)) where
+  showsPrec n (RFun f) = showParen (n > funPrec) $ f
+    (\ta ->
+      showsPrec (funPrec + 1) ta .
+      showString " -> _")
+    (\rtb ->
+      showString "_ -> " .
+      showsPrec funPrec rtb)
+    where
+      funPrec = 0
+
+class CoArbitraryRetrace a where
+  car :: Retrace (Gen b -> Gen b) a -> Gen b -> Gen b
+
+instance (CoArbitrary (Trace a), CoArbitraryRetrace b)
+  => CoArbitraryRetrace (a -> b) where
+  car (RFun f) = f coarbitrary car
+
+instance CoArbitrarySumMono ns as => CoArbitrary (Poly' name ns as) where
+  coarbitrary (Poly p_) =
+    (let SumMono_ p = p_ @(Gen b -> Gen b)
+    in casm @ns @as @b p) :: forall b. Gen b -> Gen b
+
+class CoArbitrarySumMono ns as where
+  casm :: SumMono (Gen b -> Gen b) ns as -> Gen b -> Gen b
+
+instance CoArbitrarySumMono '[] '[] where
+  casm = id
+
+instance (Rotate a, CoArbitraryProduct a, CoArbitrarySumMono ns as)
+  => CoArbitrarySumMono (n ': ns) (a ': as) where
+  casm :: forall b. SumMono (Gen b -> Gen b) (n ': ns) (a ': as) -> Gen b -> Gen b
+  casm f = casm @ns @as . f . MonoCont . rotate @a $ cap @a @b
+
+class CoArbitraryProduct as where
+  cap :: Gen b -> ProductCont (Gen b) as
+
+instance CoArbitraryProduct '[] where
+  cap = id
+
+instance (CoArbitrary a, CoArbitraryProduct as)
+  => CoArbitraryProduct (a ': as) where
+  cap g a = cap @as (coarbitrary a g)
+
+class Rotate as where
+  rotate :: (r -> ProductCont r as) -> ProductCont (r -> r) as
+
+instance Rotate '[] where
+  rotate = id
+
+instance Rotate as => Rotate (a ': as) where
+  rotate g a = rotate @as (flip g a)
+
 type F a = a -> (a -> a) -> a
 
 newtype Z = Z (forall r. Retrace r (F A))
+
+instance Show Z where
+  showsPrec n z = showParen (n > appPrec) $
+    showString "Z " .
+    showsPrecZ z
+    where
+      appPrec = 10
+
+showsPrecZ :: Z -> ShowS
+showsPrecZ (Z rt) =
+  showsPrec (appPrec + 1) (rt @ShowS)
+  where
+    appPrec = 10
+
 newtype A = A Z
 
+instance Show A where
+  showsPrec n (A z) = showsPrecZ z
+
 newtype instance Retrace r A = RetraceA (Sum r '[])
+
+instance Show (Retrace ShowS A) where
+  showsPrec _ (RetraceA r) = r
+
+instance CoArbitraryRetrace A where
+  car (RetraceA f) = f
 
 type instance Trace A = Poly "A" '[ '("", '[]) ]
 
 traceA :: Trace A
 traceA = Poly (SumMono_ (\(MonoCont p) -> p))
 
-{-
 instance Applicative m => Traceable Z m A where
   trace cs = pure (cs traceA A)
 
-instance PrettyTrace (Poly "A" '[ '("", '[]) ]) where
+instance PrettyTrace (Poly' "A" '[""] '[ '[] ]) where
   prettyTrace _ = showString "A"
 
 instance CoArbitrary A where
@@ -277,39 +363,13 @@ instance CoArbitrary A where
 instance CoArbitrary Z where
   coarbitrary (Z f) = car f
 
-class CoArbitraryRetrace a where
-  car :: Retrace (Gen b) a -> Gen b -> Gen b
-
-instance (CoArbitrary (Trace a), CoArbitraryRetrace b)
-  => CoArbitraryRetrace (a -> b) where
-  car (RFun f) = f coarbitrary car
-
-instance CoArbitrarySumMono as => CoArbitrary (Poly name as) where
-  coarbitrary (Poly (Mono p)) = casp p
-
-class CoArbitrarySumMono as where
-  casm :: SumMono (Gen b) as -> Gen b -> Gen b
-
-instance CoArbitrarySumMono '[] where
-  casp = const
-
-instance (CoArbitraryProduct a, CoArbitrarySumProduct as)
-  => CoArbitrarySumProduct (a ': as) where
-  casp f = casp . f . cap
-
-class CoArbitraryProduct a where
-  cap :: Gen b -> ProductCont (Gen b) as
-
-instance CoArbitraryProduct '[] where
-  cap = id
-
-instance (CoArbitrary a, CoArbitraryProduct as)
-  => CoArbitraryProduct (a ': as) where
-  cap g a = cap (coarbitrary a g)
-
 generateA :: (forall a. F a) -> Gen A
 generateA f = do
   a0 <- trace @Z @Gen @A (\ta ret -> ret (Z (RFun $ \k _ -> k ta)))
   a1 <- trace @Z @Gen @(A -> A) (\ta1 ret -> ret (Z (RFun $ \_ k -> k (RFun $ \k _ -> k ta1))))
   pure (f a0 a1)
--}
+
+f :: forall a. F a
+f a g = g a
+
+main = sample (generateA f)
