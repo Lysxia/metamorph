@@ -5,8 +5,11 @@ module Test.Metamorph
   , Metamorph
   , Newtype(..)
   , module Test.Metamorph.Pretty
+  , TickIO(..)
+  , runTickIO
   ) where
 
 import Test.Metamorph.Generic
 import Test.Metamorph.Internal
+import Test.Metamorph.IO
 import Test.Metamorph.Pretty

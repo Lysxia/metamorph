@@ -37,6 +37,7 @@ library
     Test.Metamorph
     Test.Metamorph.Generic
     Test.Metamorph.Internal
+    Test.Metamorph.IO
     Test.Metamorph.Pretty
   build-depends:
     base >= 4.9 && < 5,
