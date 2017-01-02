@@ -17,10 +17,10 @@
 --
 -- Note that this only gives an ordering between executions of the same action.
 --
--- @TickIO@ adds a global counter to keep track of the ordering of
+-- @GenIO@ adds a global counter to keep track of the ordering of
 -- all @IO@ actions together.
 --
--- > do { a <- runTickIO $ morphing (f @A) ; print a }
+-- > do { a <- runGenIO $ morphing (f @A) ; print a }
 --
 -- > Output: (runIO<1,1> a,runIO<3,2> a,runIO<4,2> b,runIO<2,1> b)
 
@@ -83,30 +83,30 @@ instance RunExpr (IO a) where
 
 -- | A context in which to generate @IO@ actions.
 -- See 'Test.Metamorph.IO' (@Test.Metamorph.IO@).
-newtype TickIO a = TickIO { runTickIO_ :: IORef Int -> IO a }
+newtype GenIO a = GenIO { runGenIO_ :: IORef Int -> IO a }
 
-runTickIO :: TickIO a -> IO a
-runTickIO tio = newIORef 0 >>= runTickIO_ tio
+runGenIO :: GenIO a -> IO a
+runGenIO tio = newIORef 0 >>= runGenIO_ tio
 
-instance Functor TickIO where
-  fmap f (TickIO io) = TickIO (fmap f . io)
+instance Functor GenIO where
+  fmap f (GenIO io) = GenIO (fmap f . io)
 
-instance Applicative TickIO where
-  pure = TickIO . pure . pure
-  TickIO f <*> TickIO a = TickIO (liftA2 (<*>) f a)
+instance Applicative GenIO where
+  pure = GenIO . pure . pure
+  GenIO f <*> GenIO a = GenIO (liftA2 (<*>) f a)
 
-instance Monad TickIO where
-  TickIO a_ >>= f = TickIO $ \r ->
-    a_ r >>= \a -> runTickIO_ (f a) r
+instance Monad GenIO where
+  GenIO a_ >>= f = GenIO $ \r ->
+    a_ r >>= \a -> runGenIO_ (f a) r
 
-instance MonadIO TickIO where
-  liftIO io = TickIO (const io)
+instance MonadIO GenIO where
+  liftIO io = GenIO (const io)
 
-instance Traceable z TickIO a => Traceable z TickIO (IO a) where
-  trace cs = TickIO $ \r0 -> do
+instance Traceable z GenIO a => Traceable z GenIO (IO a) where
+  trace cs = GenIO $ \r0 -> do
       r <- newIORef 0
       pure $ do
         n0 <- incr r0
         n <- incr r
         let ap ta = TraceIO (\k -> k (Just n0) n ta)
-        runTickIO_ (trace (cs . ap)) r0
+        runGenIO_ (trace (cs . ap)) r0

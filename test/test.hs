@@ -114,7 +114,7 @@ instance Newtype E' where
 
 test_E = do
   putStrLn "Example E:"
-  e <- runTickIO (morphing (f_E @E))
+  e <- runGenIO (morphing (f_E @E))
   putStrLn $ "  " ++ show e
 
 main = do

@@ -5,8 +5,8 @@ module Test.Metamorph
   , Metamorph
   , Newtype(..)
   , module Test.Metamorph.Pretty
-  , TickIO(..)
-  , runTickIO
+  , GenIO
+  , runGenIO
   ) where
 
 import Test.Metamorph.Generic
