@@ -1,3 +1,101 @@
+-- |
+--
+-- = Overview
+--
+-- == Trace
+--
+-- Given a type @t@, @'Trace' t@ is the sum of all possible ways to obtain a
+-- value of type @A@ contained in a value of type @t@.
+--
+-- - For a function, we must apply it to some argument, and we can then recursively
+--   obtain a value from the result.
+-- - For a sum of products, we can choose to obtain a value from either field
+--   of a given constructor.
+--
+-- > Trace (b -> t)     = TraceFun b (Trace t)
+-- > Trace (u, v)       = TraceFst (Trace u) | TraceSnd (Trace v)
+-- > Trace (Either u v) = TraceLeft (Trace u) | TraceRight (Trace v)
+-- > Trace ()          -- Empty type, there is no A.
+-- > Trace A = TraceA  -- One way of getting an A out of A.
+--
+-- In the case of sum types such as @Either@, the constructors @TraceLeft@ and
+-- @TraceRight@ carry redundant information: a value of type @Either u v@ will
+-- already indicate which side of the alternative is in effect.
+--
+-- == Retrace
+--
+-- Now consider the whole type @s@ of the function to test, such as:
+--
+-- > s ~ A -> (A -> A) -> A
+--
+-- @'Retrace' s@ is the sum of all possible ways to obtain a value of type @A@
+-- from all /arguments/ of @s@.
+--
+-- - The main case is of course function types @s = t -> u@, we can either obtain
+--   it from @t@ (in a way described by @Trace t@), or from an argument of @u@,
+--   recursively.
+--
+-- - Retrace r for any "result type" r is empty.
+--
+-- > Retrace (t -> u) = RetraceArg (Trace t) | RetraceImg (Retrace u)
+-- > Retrace A
+-- > Retrace Bool
+--
+-- Actually, parameterized types such as tuples and @Either@ may have a
+-- non-empty @Retrace@, in order to also consider arguments of functions
+-- contained within other values.
+--
+-- == Defining A
+--
+-- Let's consider an example.
+--
+-- > type F a = ((a, a) -> a) -> Either a a -> a
+--
+-- @f :: forall a. F a@, expects arguments of types @(a, a) -> a@ and
+-- @Either a a@.
+-- We generate @g :: (A, A) -> A@ and @h :: Either A A@, whose "leaves" of type
+-- @A@ correspond to their own positions. Thus we define @A@ as:
+--
+-- > newtype A = A (Retrace (F A))
+--
+-- Let us construct @g@ and @h@. Functions just record the argument they are
+-- given.
+--
+-- > g :: (A, A) -> A
+-- > g a2 = A . RetraceArg . TraceFun a2 $ TraceA
+--
+-- For sum types, we must choose a constructor. Hence generation must happen in
+-- some context, e.g., @Gen@ to make random choices, we could also
+-- @Enumerate@ them, or even do @IO@.
+--
+-- > gen_h :: Gen (Either A A)
+-- > gen_h = elements
+-- >   [ Left  (A . RetraceImg . RetraceArg . TraceLeft  $ TraceA)
+-- >   , Right (A . RetraceImg . RetraceArg . TraceRight $ TraceA) ]
+--
+-- An instance @Traceable z m t@ defines a generator of @t@ which thus fills
+-- the leaves of type @A@ with their positions, performing effects in @m@ when
+-- necessary. The first argument of @trace@ represents the "path" from some
+-- root @z@ to the current position, and is used to form the leaves.
+--
+-- The 'Morphing' type class wraps up and connects the generators
+-- and the monomorphized function @f :: F A@.
+--
+-- == Implementation notes
+--
+-- - There is actually one more newtype layer between @A@ and @'Retrace' (F A)@,
+--   'Metamorph', so that the user does not need to declare too many
+--   instances explicitly.
+--
+-- - 'Trace' and 'Retrace' are in fact defined as type synonym families, to
+--   (re)use generic implementations, parameterized by some type-level
+--   annotations.
+--
+-- - Algebraic data types are encoded in CPS because I thought it solved
+--   a problem with sharing at some point, but it doesn't.
+--   Maybe there is a performance gain for large generic types, but that isn't
+--   implemented yet.
+
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
