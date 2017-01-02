@@ -1,32 +1,28 @@
--- | Metamorph can work with functions taking IO as argument!
+-- | Metamorph can work with functions taking @IO@ values as arguments!
 --
--- Every generated IO action has a counter which is incremented at every
+-- Every generated @IO@ action has a counter which is incremented at every
 -- execution, so that values produced by each execution can be distinguished.
 --
--- @
--- f :: IO a -> IO b -> IO (a, a, b, b)
--- f a b = do
---   x1 <- a
---   y1 <- b
---   x2 <- a
---   y2 <- b
---   pure (x1, x2, y2, y1)
--- @
+-- > f :: IO a -> IO a -> IO (a, a, a, a)
+-- > f a b = do
+-- >   x1 <- a
+-- >   y1 <- b
+-- >   x2 <- a
+-- >   y2 <- b
+-- >   pure (x1, x2, y2, y1)
 --
--- @
--- do { a <- morphing (f @A) ; print a }
--- -- prints: (runIO<1> a,runIO<2> a,runIO<2> b, runIO<1> b)
--- @
+-- > do { a <- morphing (f @A) ; print a }
+--
+-- > Output: (runIO<1> a,runIO<2> a,runIO<2> b, runIO<1> b)
 --
 -- Note that this only gives an ordering between executions of the same action.
 --
--- TickIO adds a global counter to keep track of the ordering of
--- all IO actions together.
+-- @TickIO@ adds a global counter to keep track of the ordering of
+-- all @IO@ actions together.
 --
--- @
--- do { a <- runTickIO $ morphing (f @A) ; print a }
--- -- prints: (runIO<1,1> a,runIO<3,2> a,runIO<4,2> b,runIO<2,1> b)
--- @
+-- > do { a <- runTickIO $ morphing (f @A) ; print a }
+--
+-- > Output: (runIO<1,1> a,runIO<3,2> a,runIO<4,2> b,runIO<2,1> b)
 
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
@@ -85,6 +81,8 @@ instance PrettyTrace trace => PrettyTrace (TraceIO trace) where
 instance RunExpr (IO a) where
   runExpr = coerce
 
+-- | A context in which to generate @IO@ actions.
+-- See 'Test.Metamorph.IO' (@Test.Metamorph.IO@).
 newtype TickIO a = TickIO { runTickIO_ :: IORef Int -> IO a }
 
 runTickIO :: TickIO a -> IO a
@@ -94,7 +92,7 @@ instance Functor TickIO where
   fmap f (TickIO io) = TickIO (fmap f . io)
 
 instance Applicative TickIO where
-  pure = TickIO . pure . pure 
+  pure = TickIO . pure . pure
   TickIO f <*> TickIO a = TickIO (liftA2 (<*>) f a)
 
 instance Monad TickIO where
