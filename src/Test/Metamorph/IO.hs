@@ -65,7 +65,7 @@ type instance Retrace (IO a) = RetraceSimple "IO" '[
 type instance Untrace (IO a) = a
 
 instance MonadIO m => Morphing z m (IO a) where
-  morphing' _ = liftIO
+  morphing' _ = fmap ((,) ()) . liftIO
 
 instance PrettyTrace trace => PrettyTrace (TraceIO trace) where
   prettyTrace (TraceIO f) = f $ \i j tb vs s ->
@@ -110,3 +110,6 @@ instance Traceable z GenIO a => Traceable z GenIO (IO a) where
         n <- incr r
         let ap ta = TraceIO (\k -> k (Just n0) n ta)
         runGenIO_ (trace (cs . ap)) r0
+
+morphingIO :: Morphing (Retrace e) IO e => e -> IO (Untrace e)
+morphingIO = fmap snd . morphing

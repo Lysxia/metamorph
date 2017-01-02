@@ -339,60 +339,77 @@ type instance Untrace (Maybe a) = Maybe a
 type instance Untrace [a] = [a]
 type instance Untrace (Metamorph a) = Metamorph a
 
+type family Traced a :: *
+type instance Traced (a -> b) = (a, Traced b)
+type instance Traced (IO a) = ()
+type instance Traced () = ()
+type instance Traced Bool = ()
+type instance Traced Integer = ()
+type instance Traced Int = ()
+type instance Traced (a, b) = ()
+type instance Traced (Either a b) = ()
+type instance Traced (Maybe a) = ()
+type instance Traced [a] = ()
+type instance Traced (Metamorph a) = ()
+
 class Applicative m => Morphing z m a where
-  morphing' :: (Retrace a -> z) -> a -> m (Untrace a)
+  morphing' :: (Retrace a -> z) -> a -> m (Traced a, Untrace a)
 
 instance (Monad m, Traceable z m a, Morphing z m b)
   => Morphing z m (a -> b) where
   morphing' k f = do
     a <- trace @z @m @a (\ta -> k (RetraceFun $ \k _ -> k ta))
-    morphing' (k . \rtb -> RetraceFun $ \_ k -> k rtb) (f a)
+    (args, r) <- morphing' (k . \rtb -> RetraceFun $ \_ k -> k rtb) (f a)
+    pure ((a, args), r)
+
+pure' :: Applicative m => t -> a -> m ((), a)
+pure' _ a = pure ((), a)
 
 instance Applicative m => Morphing z m () where
-  morphing' _ = pure
+  morphing' = pure'
 
 instance Applicative m => Morphing z m Bool where
-  morphing' _ = pure
+  morphing' = pure'
 
 instance Applicative m => Morphing z m Integer where
-  morphing' _ = pure
+  morphing' = pure'
 
 instance Applicative m => Morphing z m Int where
-  morphing' _ = pure
+  morphing' = pure'
 
 instance Applicative m => Morphing z m (a, b) where
-  morphing' _ = pure
+  morphing' = pure'
 
 instance Applicative m => Morphing z m (Either a b) where
-  morphing' _ = pure
+  morphing' = pure'
 
 instance Applicative m => Morphing z m (Maybe a) where
-  morphing' _ = pure
+  morphing' = pure'
 
 instance Applicative m => Morphing z m [c] where
-  morphing' _ = pure
+  morphing' = pure'
 
 instance Applicative m => Morphing z m (Metamorph a) where
-  morphing' _ = pure
+  morphing' = pure'
 
 -- | Evaluate a monomorphized function of type @e@ symbolically,
 -- generated in a compatible applicative context @m@.
 --
 -- If the function type is @forall a. F a@, you most likely want
 -- @e ~ F ('Metamorph' A')@.
-morphing :: Morphing (Retrace e) m e => e -> m (Untrace e)
+morphing :: Morphing (Retrace e) m e => e -> m (Traced e, Untrace e)
 morphing = morphing' id
 
 -- | When a single evaluation is sufficient, @morphing@ may happen in
 -- @Identity@.
 morphingPure :: Morphing (Retrace e) Identity e => e -> Untrace e
-morphingPure = runIdentity . morphing
+morphingPure = snd . runIdentity . morphing
 
 -- | In general, inputs may be generated randomly.
 --
 -- For example, if @f :: forall a. [a] -> [a]@, the length of the input is a
 -- dimension to be generated, as @f@ may behave differently depending on it.
-morphingGen :: Morphing (Retrace e) Gen e => e -> Gen (Untrace e)
+morphingGen :: Morphing (Retrace e) Gen e => e -> Gen (Traced e, Untrace e)
 morphingGen = morphing
 
 -- | A type class for unwrapping @newtype@ values.

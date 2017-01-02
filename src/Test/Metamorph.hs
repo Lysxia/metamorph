@@ -2,6 +2,7 @@ module Test.Metamorph
   ( morphing
   , morphingPure
   , morphingGen
+  , morphingIO
   , Metamorph
   , Newtype(..)
   , module Test.Metamorph.Pretty

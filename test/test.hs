@@ -66,7 +66,8 @@ instance Newtype C' where
 test_C = do
   putStrLn "Example C:"
   replicateM_ 5 $
-    generate g_C >>= \c -> putStrLn $ "  " ++ show c
+    generate g_C >>= \((x,_), c) ->
+      putStrLn $ "  " ++ show x ++ " -> " ++ show c
   where
     g_C = morphing (f_C @C)
 
@@ -90,7 +91,7 @@ instance Newtype D' where
 
 test_D = do
   putStrLn "Example D:"
-  d <- morphing (f_D @D)
+  d <- morphingIO (f_D @D)
   putStrLn $ "  " ++ show d
 
 -- Example E: IO
@@ -114,7 +115,7 @@ instance Newtype E' where
 
 test_E = do
   putStrLn "Example E:"
-  e <- runGenIO (morphing (f_E @E))
+  (_, e) <- runGenIO (morphing (f_E @E))
   putStrLn $ "  " ++ show e
 
 main = do
