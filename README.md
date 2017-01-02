@@ -19,7 +19,7 @@ From the type of `f` and a single value, you can deduce that `f` just iterates
 a function three times:
 
 ```haskell
-f :: a -> (a -> a) -> a
+f :: forall a. a -> (a -> a) -> a
 f a r = r (r (r a))
 ```
 
@@ -31,23 +31,41 @@ Given a universally quantified type, e.g., `forall a. a -> (a -> a) -> a`,
 `metamorph` can craft a type `A` and special inputs to perform a sort of
 symbolic evaluation of functions of that type.
 
-These inputs are computed by `morphingPure`, which simply returns the result.
+Reverse engineer functions
+--------------------------
+
+Functions of certain types, such as `forall a. a -> (a -> a) -> a`, are
+uniquely determined by the image of a single well chosen input. In that case,
+we can guess the definition of a polymorphic function with `prettyMorphing`:
 
 ```haskell
-morphingPure :: (A -> (A -> A) -> A) -> A
+prettyMorphing :: (...) => String -> monomorphizedType -> String
+prettyMorphing :: String -> (A -> (A -> A) -> A) -> String`
 ```
 
-We can print it.
+    > putStrLn $ prettyMorphing "f" (f :: A -> (A -> A) -> A)
+    f a b = b (b (b a))
 
-    > print (morphingPure (f :: A -> (A -> A) -> A))
-    ([_ -> * -> _] ([_ -> * -> _] ([_ -> * -> _] [* -> _])))
+Random evaluation
+-----------------
 
-Meaning:
+In other cases, `prettyMorphing` won't type check. You may try to use
+`morphingGen` to generate some random inputs. Thanks to QuickCheck, even
+functions can be generated!
 
-    a = [* -> _]
-    r = [_ -> * -> _]
+For any function type `F a` and an associated `A` constructed by `metamorph`:
 
-    f a r = r (r (r a))
+```haskell
+morphingGen :: F A -> Test.QuickCheck.Gen A
+```
+
+For example, if `F a = [a] -> [a]`,
+
+    > generate (morphingGen (reverse :: [A] -> [A])) >>= print
+    [a !! 3,a !! 2,a !! 1,a !! 0]
+
+Some list `a` was generated, and this shows that the image of `a` under
+`reverse` is another list containing the first four elements of `a` in reverse.
 
 Examples can be found under `test/`.
 
@@ -86,39 +104,34 @@ type A = Metamorph A'
 f_ :: A -> (A -> A) -> A
 f_ = f
 
--- The second incantation is morphingPure. It takes the monomorphized function,
--- generates some magical arguments to be applied to and returns the result.
 -- For this type, you only need to look at a single value to deduce everything
--- about f, and morphingPure holds an ideal pair (A, (A -> A)) that it can
--- produce purely (to be applied to f)!
+-- about f. metamorph implicitly and purely computes an ideal pair (A, A -> A)
+-- to be applied to f.
 --
--- > morphingPure :: (A -> (A -> A) -> A) -> A
-
-main = print (morphingPure f_)
-```
-
----
-
-`morphingPure` typechecks precisely when the function can entirely be
-determined by a single well chosen input.
-
-In other cases, you may try generating some random inputs thanks to QuickCheck;
-even functions can be generated!
-
-```haskell
-morphing :: F A -> Test.QuickCheck.Gen A
+-- 'morphingPure' applies these arguments to the function, and returns the
+-- result.
+--
+-- > morphingPure :: F A -> A
+--
+-- 'prettyMorphing' produces a possible definition of the function.
+--
+-- > prettyMorphing :: String -> F A -> String
+--
+main = do
+  print (morphingPure f_)            -- b (b (b a))
+  putStrLn (prettyMorphing "f" f_)   -- f a b = b (b (b a))
 ```
 
 Future work
 -----------
 
-- Actual documentation. Also, better names.
+- Documentation.
 
 - We could also enumerate inputs.
   Even if there may be more than one necessary value to observe,
   there are many cases where they live in a very small space;
   e.g., `forall a. [a] -> [a]`, only one list of each length is necessary
-  to characterise a function of that type.
+  to identify a function of that type.
 
 - Generic implementation for algebraic data types.
   The type `F` must currently use only:

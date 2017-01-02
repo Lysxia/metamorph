@@ -2,7 +2,6 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE MagicHash #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -16,7 +15,7 @@ module Test.Metamorph.Internal where
 import Control.Applicative
 import Data.Functor.Identity
 import Data.List (stripPrefix)
-import GHC.Exts (Constraint, proxy#)
+import GHC.Exts (Constraint)
 import GHC.TypeLits
 import Test.QuickCheck
 import Test.QuickCheck.Gen (Gen(..))
@@ -50,49 +49,6 @@ type instance Trace (Either a b) = TraceSimple "Either" '[
 type instance Trace (Maybe a) = TraceSimple "Maybe" '[ '("fromJust", Trace a) ]
 type instance Trace [a] = TraceList (Trace a)
 type instance Trace (Metamorph a) = TraceEnd
-
--- * Showing traces.
-
-class PrettyTrace t where
-  prettyTrace :: t -> ShowS -> ShowS
-
-class PrettySum as where
-  prettySum :: Sum' (ShowS -> ShowS) as -> ShowS -> ShowS
-
-instance PrettySum as
-  => PrettyTrace (TraceSimple n0 as) where
-  prettyTrace (TraceSimple t) = prettySum t
-
-instance PrettySum '[] where
-  prettySum (TagEmpty s) = s
-
--- <trace> (unCons (...))
-instance (KnownSymbol n, PrettyTrace a, PrettySum as)
-  => PrettySum ('(n, a) ': as) where
-  prettySum (TagPlus f) = prettySum . f $ \ta s ->
-    prettyTrace ta . showParen True $
-      showString (symbolVal' @n proxy#) . showString " " . s
-
--- <trace> ((...) a)
-instance (Show a, PrettyTrace trace)
-  => PrettyTrace (TraceFun a trace) where
-  prettyTrace (TraceFun f) = f $ \a tb s ->
-    prettyTrace tb . showParen True $
-      s .
-      showString " " .
-      showsPrec 11 a
-
--- <trace> ((...) !! n)
-instance PrettyTrace trace
-  => PrettyTrace (TraceList trace) where
-  prettyTrace (TraceList f) = f $ \n ta s ->
-    prettyTrace ta . showParen True $
-      s .
-      showString " !! " .
-      shows n
-
-instance PrettyTrace TraceEnd where
-  prettyTrace _ = id
 
 -- * Generating values.
 
@@ -225,57 +181,45 @@ instance CoArbitrary TraceEnd where
 
 -- * Retrace
 
-newtype RetraceFun trace retrace = RetraceFun (forall r. Sum r '[ trace, retrace ])
-newtype Void = Void (forall r. r)
+newtype RetraceSimple (n0 :: Symbol) (as :: [(Symbol, *)])
+  = RetraceSimple (forall r. Sum' r as)
+
+type Void (n0 :: Symbol) = RetraceSimple n0 '[]
+
+newtype RetraceFun trace retrace
+  = RetraceFun (forall r. Sum r '[ trace, retrace ])
+
+newtype RetraceList retrace
+  = RetraceList (forall r. ProductCont r '[ Int, retrace ] -> r)
 
 type family Retrace a :: *
 type instance Retrace (a -> b) = RetraceFun (Trace a) (Retrace b)
-type instance Retrace () = Void
-type instance Retrace Bool = Void
-type instance Retrace Integer = Void
-type instance Retrace Int = Void
-type instance Retrace (_, _) = Void
-type instance Retrace (Either _ _) = Void
-type instance Retrace (Maybe _) = Void
-type instance Retrace [c] = Void
-type instance Retrace (Metamorph a) = Void
+type instance Retrace () = Void "()"
+type instance Retrace Bool = Void "Bool"
+type instance Retrace Integer = Void "Integer"
+type instance Retrace Int = Void "Int"
+type instance Retrace (a, b) = RetraceSimple "(,)" '[
+  '("(*, _)", Retrace a),
+  '("(_, *)", Retrace b)]
+type instance Retrace (Either a b) = RetraceSimple "Either" '[
+  '("Either * _", Retrace a),
+  '("Either _ *", Retrace b)]
+type instance Retrace (Maybe a) = RetraceSimple "Maybe" '[
+  '("Maybe *", Retrace a)]
+type instance Retrace [a] = RetraceList (Retrace a)
+type instance Retrace (Metamorph a) = Void "Metamorph _"
 
 -- | A type of values which remember how they were constructed.
 --
 -- The argument @a@ of @'Metamorph' a@ must be an instance of 'Newtype'.
 newtype Metamorph a = Metamorph (Retrace (Old a))
 
-class PrettyRetrace t where
-  prettyRetrace :: t -> (ShowS -> ShowS) -> ShowS
-
-instance (PrettyTrace trace, PrettyRetrace retrace)
-  => PrettyRetrace (RetraceFun trace retrace) where
-  prettyRetrace (RetraceFun f) = f
-    (\t cxt ->
-      prettyTrace t $
-        showBkt (cxt (showString "* -> _")))
-    (\rt cxt ->
-      prettyRetrace rt (cxt . (showString "_ -> " .)))
-    where
-      showBkt s = showString "[" . s . showString "]"
-
-instance PrettyRetrace Void where
-  prettyRetrace (Void f) = f
-
-instance (Newtype a, PrettyRetrace (Retrace (Old a)))
-  => Show (Metamorph a) where
-  showsPrec _ (Metamorph a) = prettyRetrace a id
-
-instance (PrettyTrace trace, PrettyRetrace retrace)
-  => Show (RetraceFun trace retrace) where
-  showsPrec _ a = prettyRetrace a id
-
 instance (CoArbitrary trace, CoArbitrary retrace)
   => CoArbitrary (RetraceFun trace retrace) where
   coarbitrary (RetraceFun f) = f coarbitrary coarbitrary
 
-instance CoArbitrary Void where
-  coarbitrary (Void r) = r
+instance CoArbitrarySum as => CoArbitrary (RetraceSimple n0 as) where
+  coarbitrary (RetraceSimple r) = coarbitrarySum 0 r
 
 instance (Newtype a, CoArbitrary (Retrace (Old a)))
   => CoArbitrary (Metamorph a) where
@@ -292,7 +236,7 @@ type instance Untrace Int = Int
 type instance Untrace (a, b) = (a, b)
 type instance Untrace (Either a b) = Either a b
 type instance Untrace (Maybe a) = Maybe a
-type instance Untrace [a] = [a]  -- Could be more general.
+type instance Untrace [a] = [a]
 type instance Untrace (Metamorph a) = Metamorph a
 
 class Applicative m => Morphing z m a where
@@ -329,7 +273,7 @@ instance Applicative m => Morphing z m [c] where
   morphing' _ = pure
 
 instance Applicative m => Morphing z m (Metamorph a) where
-  morphing' _ a = pure a
+  morphing' _ = pure
 
 -- | Evaluate a monomorphized function of type @e@ symbolically,
 -- generated in a compatible applicative context @m@.

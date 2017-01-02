@@ -25,11 +25,10 @@ instance Newtype A' where
   type Old A' = F A
   unwrap (A' a) = a
 
-test_F =
-  generate g_A >>= \a ->
-    putStrLn $ "Example A: " ++ show a
-  where
-    g_A = morphing (_F @A) :: Gen A
+test_F = do
+  putStrLn "Example A"
+  putStrLn $ "  " ++ show (morphingPure (_F @A))
+  putStrLn $ "  " ++ prettyMorphing "_F" (_F @A)
 
 -- Example B
 
@@ -45,8 +44,9 @@ instance Newtype B' where
   type Old B' = G B
   unwrap (B' b) = b
 
-test_G =
-  putStrLn $ "Example B: " ++ show (morphingPure (_G @B))
+test_G = do
+  putStrLn "Example B"
+  putStrLn $ "  " ++ prettyMorphing "_G" (_G @B)
 
 -- Example C
 
