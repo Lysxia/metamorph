@@ -31,15 +31,15 @@ Given a universally quantified type, e.g., `forall a. a -> (a -> a) -> a`,
 `metamorph` can craft a type `A` and special inputs to perform a sort of
 symbolic evaluation of functions of that type.
 
-These inputs are computed by `morphing`, which simply returns the result.
+These inputs are computed by `morphingPure`, which simply returns the result.
 
 ```haskell
-morphing :: (A -> (A -> A) -> A) -> Identity A
+morphingPure :: (A -> (A -> A) -> A) -> A
 ```
 
 We can print it.
 
-    > print (runIdentity (morphing (f :: A -> (A -> A) -> A)))
+    > print (morphingPure (f :: A -> (A -> A) -> A))
     ([_ -> * -> _] ([_ -> * -> _] ([_ -> * -> _] [* -> _])))
 
 Meaning:
@@ -49,9 +49,9 @@ Meaning:
 
     f a r = r (r (r a))
 
----
-
 Examples can be found under `test/`.
+
+---
 
 ```haskell
 -- No Template Haskell! Magic!
@@ -86,22 +86,23 @@ type A = Metamorph A'
 f_ :: A -> (A -> A) -> A
 f_ = f
 
--- The second incantation is morphing. It takes the monomorphized function,
+-- The second incantation is morphingPure. It takes the monomorphized function,
 -- generates some magical arguments to be applied to and returns the result.
 -- For this type, you only need to look at a single value to deduce everything
--- about f, and morphing holds an ideal pair (A, (A -> A)) that it can
+-- about f, and morphingPure holds an ideal pair (A, (A -> A)) that it can
 -- produce purely (to be applied to f)!
 --
--- > morphing :: (A -> (A -> A) -> A) -> Identity A
+-- > morphingPure :: (A -> (A -> A) -> A) -> A
 
-main = print (runIdentity (morphing f_))
+main = print (morphingPure f_)
 ```
 
-`morphing` can execute in `Identity` precisely when the function can entirely
-be determined by a single well chosen input.
-In other cases, using `Identity` will just not typecheck.
+---
 
-Instead, you may try generating some random inputs thanks to QuickCheck;
+`morphingPure` typechecks precisely when the function can entirely be
+determined by a single well chosen input.
+
+In other cases, you may try generating some random inputs thanks to QuickCheck;
 even functions can be generated!
 
 ```haskell

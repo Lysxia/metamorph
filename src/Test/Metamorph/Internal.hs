@@ -240,6 +240,9 @@ type instance Retrace (Maybe _) = Void
 type instance Retrace [c] = Void
 type instance Retrace (Metamorph a) = Void
 
+-- | A type of values which remember how they were constructed.
+--
+-- The argument @a@ of @'Metamorph' a@ must be an instance of 'Newtype'.
 newtype Metamorph a = Metamorph (Retrace (Old a))
 
 class PrettyRetrace t where
@@ -292,7 +295,7 @@ type instance Untrace (Maybe a) = Maybe a
 type instance Untrace [a] = [a]  -- Could be more general.
 type instance Untrace (Metamorph a) = Metamorph a
 
-class Morphing z m a where
+class Applicative m => Morphing z m a where
   morphing' :: (Retrace a -> z) -> a -> m (Untrace a)
 
 instance (Monad m, Traceable z m a, Morphing z m b)
@@ -328,11 +331,42 @@ instance Applicative m => Morphing z m [c] where
 instance Applicative m => Morphing z m (Metamorph a) where
   morphing' _ a = pure a
 
-morphing :: Morphing (Retrace a) m a => a -> m (Untrace a)
+-- | Evaluate a monomorphized function of type @e@ symbolically,
+-- generated in a compatible applicative context @m@.
+--
+-- If the function type is @forall a. F a@, you most likely want
+-- @e ~ F ('Metamorph' A')@.
+morphing :: Morphing (Retrace e) m e => e -> m (Untrace e)
 morphing = morphing' id
 
--- | Forgetting this may make the compiler hang!
+-- | When a single evaluation is sufficient, @morphing@ may happen in
+-- @Identity@.
+morphingPure :: Morphing (Retrace e) Identity e => e -> Untrace e
+morphingPure = runIdentity . morphing
+
+-- | In general, inputs may be generated randomly.
+--
+-- For example, if @f :: forall a. [a] -> [a]@, the length of the input is a
+-- dimension to be generated, as @f@ may behave differently depending on it.
+morphingGen :: Morphing (Retrace e) Gen e => e -> Gen (Untrace e)
+morphingGen = morphing
+
+-- | A type class for unwrapping @newtype@ values.
+--
+-- @
+-- newtype N = N t
+--
+-- instance 'Newtype' N where
+--   type 'Old' N = t
+--   'unwrap' (N t) = t
+-- @
+--
+-- Forgetting to implement this seems to make the compiler hang for whatever
+-- reason.
+--
 class Newtype n where
+  -- | Wrapped type.
   type Old n :: *
+  -- | Look inside a @newtype@.
   unwrap :: n -> Old n
 

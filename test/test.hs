@@ -6,6 +6,7 @@
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 
+import Control.Monad (replicateM_)
 import Data.Functor.Identity
 import Test.QuickCheck
 import Test.Metamorph
@@ -24,7 +25,9 @@ instance Newtype A' where
   type Old A' = F A
   unwrap (A' a) = a
 
-test_F = generate g_A >>= print
+test_F =
+  generate g_A >>= \a ->
+    putStrLn $ "Example A: " ++ show a
   where
     g_A = morphing (_F @A) :: Gen A
 
@@ -42,9 +45,8 @@ instance Newtype B' where
   type Old B' = G B
   unwrap (B' b) = b
 
-test_G = print (runIdentity i_B)
-  where
-    i_B = morphing (_G @B) :: Identity B
+test_G =
+  putStrLn $ "Example B: " ++ show (morphingPure (_G @B))
 
 -- Example C
 
@@ -61,7 +63,10 @@ instance Newtype C' where
   type Old C' = H C
   unwrap (C' c) = c
 
-test_C = generate g_C >>= print
+test_C = do
+  putStrLn "Example C:"
+  replicateM_ 5 $
+    generate g_C >>= \c -> putStrLn $ "  " ++ show c
   where
     g_C = morphing (_H @C)
 

@@ -1,6 +1,9 @@
 module Test.Metamorph
-  ( module Test.Metamorph.Generic
-  , module Test.Metamorph.Internal
+  ( morphing
+  , morphingPure
+  , morphingGen
+  , Metamorph
+  , Newtype(..)
   ) where
 
 import Test.Metamorph.Generic
