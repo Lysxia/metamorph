@@ -17,8 +17,8 @@ type F a = a -> (a -> a) -> a
 _F :: forall a. F a
 _F a r = r a
 
-type A = Retrace A'
-newtype A' = A' (F (Retrace A'))
+type A = Metamorph A'
+newtype A' = A' (F (Metamorph A'))
 
 instance Newtype A' where
   type Old A' = F A
@@ -26,7 +26,7 @@ instance Newtype A' where
 
 test_F = generate g_A >>= print
   where
-    g_A = runtrace (_F @A) :: Gen A
+    g_A = morphing (_F @A) :: Gen A
 
 -- Example B
 
@@ -35,7 +35,7 @@ type G b = (Maybe b -> b) -> b
 _G :: forall b. G b
 _G f = f (Just (f Nothing))
 
-type B = Retrace B'
+type B = Metamorph B'
 newtype B' = B' (G B)
 
 instance Newtype B' where
@@ -44,7 +44,7 @@ instance Newtype B' where
 
 test_G = print (runIdentity i_B)
   where
-    i_B = runtrace (_G @B) :: Identity B
+    i_B = morphing (_G @B) :: Identity B
 
 -- Example C
 
@@ -54,7 +54,7 @@ _H :: forall c. H c
 _H (c1 : c2 : cs) = c2 : c1 : _H cs
 _H cs = cs
 
-type C = Retrace C'
+type C = Metamorph C'
 newtype C' = C' (H C)
 
 instance Newtype C' where
@@ -63,7 +63,7 @@ instance Newtype C' where
 
 test_C = generate g_C >>= print
   where
-    g_C = runtrace (_H @C)
+    g_C = morphing (_H @C)
 
 main = do
   test_F

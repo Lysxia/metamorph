@@ -31,15 +31,15 @@ Given a universally quantified type, e.g., `forall a. a -> (a -> a) -> a`,
 `metamorph` can craft a type `A` and special inputs to perform a sort of
 symbolic evaluation of functions of that type.
 
-These inputs are computed by `runtrace`, which simply returns the result.
+These inputs are computed by `morphing`, which simply returns the result.
 
 ```haskell
-runtrace :: (A -> (A -> A) -> A) -> Identity A
+morphing :: (A -> (A -> A) -> A) -> Identity A
 ```
 
 We can print it.
 
-    > print (runIdentity (runtrace (f :: A -> (A -> A) -> A)))
+    > print (runIdentity (morphing (f :: A -> (A -> A) -> A)))
     ([_ -> * -> _] ([_ -> * -> _] ([_ -> * -> _] [* -> _])))
 
 Meaning:
@@ -68,36 +68,36 @@ f :: {- forall a. -} F a
 f a r = r (r (r a))
 
 -- The only ingredient you need to invent is the type synonym F.
--- Everything else (Retrace, Newtype) belongs to Test.Metamorph.
+-- Everything else (Metamorph, Newtype) belongs to Test.Metamorph.
 -- The first incantation is one newtype and a trivial (enough) instance
 -- to unwrap it.
 
-newtype A' = A' (F (Retrace A'))
+newtype A' = A' (F (Metamorph A'))
 
 instance Newtype A' where
-  type Old A' = F (Retrace A')
+  type Old A' = F (Metamorph A')
   unwrap (A' a) = a
 
 -- This is the type at which to instantiate f.
 -- It is Show-able.
-type A = Retrace A'
+type A = Metamorph A'
 
 -- Monomorphization!
 f_ :: A -> (A -> A) -> A
 f_ = f
 
--- The second incantation is runtrace. It takes the monomorphized function,
+-- The second incantation is morphing. It takes the monomorphized function,
 -- generates some magical arguments to be applied to and returns the result.
 -- For this type, you only need to look at a single value to deduce everything
--- about f, and runtrace holds an ideal pair (A, (A -> A)) that it can
+-- about f, and morphing holds an ideal pair (A, (A -> A)) that it can
 -- produce purely (to be applied to f)!
 --
--- > runtrace :: (A -> (A -> A) -> A) -> Identity A
+-- > morphing :: (A -> (A -> A) -> A) -> Identity A
 
-main = print (runIdentity (runtrace f_))
+main = print (runIdentity (morphing f_))
 ```
 
-`runtrace` can execute in `Identity` precisely when the function can entirely
+`morphing` can execute in `Identity` precisely when the function can entirely
 be determined by a single well chosen input.
 In other cases, using `Identity` will just not typecheck.
 
@@ -105,7 +105,7 @@ Instead, you may try generating some random inputs thanks to QuickCheck;
 even functions can be generated!
 
 ```haskell
-runtrace :: F A -> Test.QuickCheck.Gen A
+morphing :: F A -> Test.QuickCheck.Gen A
 ```
 
 Future work

@@ -49,7 +49,7 @@ type instance Trace (Either a b) = TraceSimple "Either" '[
   '("fromRight", Trace b)]
 type instance Trace (Maybe a) = TraceSimple "Maybe" '[ '("fromJust", Trace a) ]
 type instance Trace [a] = TraceList (Trace a)
-type instance Trace (Retrace a) = TraceEnd
+type instance Trace (Metamorph a) = TraceEnd
 
 -- * Showing traces.
 
@@ -164,9 +164,9 @@ traceList n cs =
   where
     fa ta = TraceList $ \k -> k n ta
 
-instance (Applicative m, Newtype a, Retrace_ (Old a) ~ z)
-  => Traceable z m (Retrace a) where
-  trace cs = pure (cs TraceEnd Retrace)
+instance (Applicative m, Newtype a, Retrace (Old a) ~ z)
+  => Traceable z m (Metamorph a) where
+  trace cs = pure (cs TraceEnd Metamorph)
 
 autotag :: forall n1 a1 n0 as. Autotag n1 a1 as => a1 -> TraceSimple n0 as
 autotag a = TraceSimple (autotag' @n1 a)
@@ -228,44 +228,44 @@ instance CoArbitrary TraceEnd where
 newtype RetraceFun trace retrace = RetraceFun (forall r. Sum r '[ trace, retrace ])
 newtype Void = Void (forall r. r)
 
-type family Retrace_ a :: *
-type instance Retrace_ (a -> b) = RetraceFun (Trace a) (Retrace_ b)
-type instance Retrace_ () = Void
-type instance Retrace_ Bool = Void
-type instance Retrace_ Integer = Void
-type instance Retrace_ Int = Void
-type instance Retrace_ (_, _) = Void
-type instance Retrace_ (Either _ _) = Void
-type instance Retrace_ (Maybe _) = Void
-type instance Retrace_ [c] = Void
-type instance Retrace_ (Retrace a) = Void
+type family Retrace a :: *
+type instance Retrace (a -> b) = RetraceFun (Trace a) (Retrace b)
+type instance Retrace () = Void
+type instance Retrace Bool = Void
+type instance Retrace Integer = Void
+type instance Retrace Int = Void
+type instance Retrace (_, _) = Void
+type instance Retrace (Either _ _) = Void
+type instance Retrace (Maybe _) = Void
+type instance Retrace [c] = Void
+type instance Retrace (Metamorph a) = Void
 
-newtype Retrace a = Retrace (Retrace_ (Old a))
+newtype Metamorph a = Metamorph (Retrace (Old a))
 
-class PrettyRetrace_ t where
-  prettyRetrace_ :: t -> (ShowS -> ShowS) -> ShowS
+class PrettyRetrace t where
+  prettyRetrace :: t -> (ShowS -> ShowS) -> ShowS
 
-instance (PrettyTrace trace, PrettyRetrace_ retrace)
-  => PrettyRetrace_ (RetraceFun trace retrace) where
-  prettyRetrace_ (RetraceFun f) = f
+instance (PrettyTrace trace, PrettyRetrace retrace)
+  => PrettyRetrace (RetraceFun trace retrace) where
+  prettyRetrace (RetraceFun f) = f
     (\t cxt ->
       prettyTrace t $
         showBkt (cxt (showString "* -> _")))
     (\rt cxt ->
-      prettyRetrace_ rt (cxt . (showString "_ -> " .)))
+      prettyRetrace rt (cxt . (showString "_ -> " .)))
     where
       showBkt s = showString "[" . s . showString "]"
 
-instance PrettyRetrace_ Void where
-  prettyRetrace_ (Void f) = f
+instance PrettyRetrace Void where
+  prettyRetrace (Void f) = f
 
-instance (Newtype a, PrettyRetrace_ (Retrace_ (Old a)))
-  => Show (Retrace a) where
-  showsPrec _ (Retrace a) = prettyRetrace_ a id
+instance (Newtype a, PrettyRetrace (Retrace (Old a)))
+  => Show (Metamorph a) where
+  showsPrec _ (Metamorph a) = prettyRetrace a id
 
-instance (PrettyTrace trace, PrettyRetrace_ retrace)
+instance (PrettyTrace trace, PrettyRetrace retrace)
   => Show (RetraceFun trace retrace) where
-  showsPrec _ a = prettyRetrace_ a id
+  showsPrec _ a = prettyRetrace a id
 
 instance (CoArbitrary trace, CoArbitrary retrace)
   => CoArbitrary (RetraceFun trace retrace) where
@@ -274,9 +274,9 @@ instance (CoArbitrary trace, CoArbitrary retrace)
 instance CoArbitrary Void where
   coarbitrary (Void r) = r
 
-instance (Newtype a, CoArbitrary (Retrace_ (Old a)))
-  => CoArbitrary (Retrace a) where
-  coarbitrary (Retrace a) = coarbitrary a
+instance (Newtype a, CoArbitrary (Retrace (Old a)))
+  => CoArbitrary (Metamorph a) where
+  coarbitrary (Metamorph a) = coarbitrary a
 
 -- * Untrace
 
@@ -290,46 +290,46 @@ type instance Untrace (a, b) = (a, b)
 type instance Untrace (Either a b) = Either a b
 type instance Untrace (Maybe a) = Maybe a
 type instance Untrace [a] = [a]  -- Could be more general.
-type instance Untrace (Retrace a) = Retrace a
+type instance Untrace (Metamorph a) = Metamorph a
 
-class RunTrace z m a where
-  runtrace' :: (Retrace_ a -> z) -> a -> m (Untrace a)
+class Morphing z m a where
+  morphing' :: (Retrace a -> z) -> a -> m (Untrace a)
 
-instance (Monad m, Traceable z m a, RunTrace z m b)
-  => RunTrace z m (a -> b) where
-  runtrace' k f = do
+instance (Monad m, Traceable z m a, Morphing z m b)
+  => Morphing z m (a -> b) where
+  morphing' k f = do
     a <- trace @z @m @a (\ta ret -> ret (k (RetraceFun $ \k _ -> k ta)))
-    runtrace' (k . \rtb -> RetraceFun $ \_ k -> k rtb) (f a)
+    morphing' (k . \rtb -> RetraceFun $ \_ k -> k rtb) (f a)
 
-instance Applicative m => RunTrace z m () where
-  runtrace' _ = pure
+instance Applicative m => Morphing z m () where
+  morphing' _ = pure
 
-instance Applicative m => RunTrace z m Bool where
-  runtrace' _ = pure
+instance Applicative m => Morphing z m Bool where
+  morphing' _ = pure
 
-instance Applicative m => RunTrace z m Integer where
-  runtrace' _ = pure
+instance Applicative m => Morphing z m Integer where
+  morphing' _ = pure
 
-instance Applicative m => RunTrace z m Int where
-  runtrace' _ = pure
+instance Applicative m => Morphing z m Int where
+  morphing' _ = pure
 
-instance Applicative m => RunTrace z m (a, b) where
-  runtrace' _ = pure
+instance Applicative m => Morphing z m (a, b) where
+  morphing' _ = pure
 
-instance Applicative m => RunTrace z m (Either a b) where
-  runtrace' _ = pure
+instance Applicative m => Morphing z m (Either a b) where
+  morphing' _ = pure
 
-instance Applicative m => RunTrace z m (Maybe a) where
-  runtrace' _ = pure
+instance Applicative m => Morphing z m (Maybe a) where
+  morphing' _ = pure
 
-instance Applicative m => RunTrace z m [c] where
-  runtrace' _ = pure
+instance Applicative m => Morphing z m [c] where
+  morphing' _ = pure
 
-instance Applicative m => RunTrace z m (Retrace a) where
-  runtrace' _ a = pure a
+instance Applicative m => Morphing z m (Metamorph a) where
+  morphing' _ a = pure a
 
-runtrace :: RunTrace (Retrace_ a) m a => a -> m (Untrace a)
-runtrace = runtrace' id
+morphing :: Morphing (Retrace a) m a => a -> m (Untrace a)
+morphing = morphing' id
 
 -- | Forgetting this may make the compiler hang!
 class Newtype n where
