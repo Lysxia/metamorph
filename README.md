@@ -38,10 +38,8 @@ Functions of certain types, such as `forall a. a -> (a -> a) -> a`, are
 uniquely determined by the image of a single well chosen input. In that case,
 we can guess the definition of a polymorphic function with `prettyMorphing`:
 
-```haskell
-prettyMorphing :: (...) => String -> monomorphizedType -> String
-prettyMorphing :: String -> (A -> (A -> A) -> A) -> String`
-```
+    prettyMorphing :: (...) => String -> monomorphizedType -> String
+    prettyMorphing :: String -> (A -> (A -> A) -> A) -> String`
 
     > prettyMorphing "f" (f :: A -> (A -> A) -> A)
     "f a b = b (b (b a))"
