@@ -69,7 +69,7 @@ test_C = do
     generate g_C >>= \((x,_), c) ->
       putStrLn $ "  a@" ++ pretty_ x ++ " -> " ++ show c
   where
-    g_C = morphing (f_C @C)
+    g_C = resize 10 $ morphing (f_C @C)
 
 -- Example D: IO
 

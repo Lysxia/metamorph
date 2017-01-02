@@ -152,7 +152,7 @@ type instance Trace (Metamorph a) = TraceEnd
 
 class Applicative m => Select m where
   (?) :: m a -> m a -> m a
-  select :: [m a] -> m a
+  selectInt :: m Int
 
 class Splittable m a where
   split :: (a -> m b) -> m (a -> b)
@@ -167,7 +167,7 @@ instance Splittable Identity a where
 
 instance Select Gen where
   ma ? mb = arbitrary >>= \b -> if b then ma else mb
-  select = oneof
+  selectInt = sized $ \n -> choose (0, n)
 
 class Traceable z m a where
   trace :: (Trace a -> z) -> m a
@@ -204,19 +204,21 @@ instance (Select m, Traceable z m a)
   => Traceable z m (Maybe a) where
   trace cs = pure Nothing ? Just <$> trace (cs . autotag @"fromJust")
 
-instance (Select m, Traceable z m a)
+instance (Monad m, Select m, Traceable z m a)
   => Traceable z m [a] where
-  trace = traceList 0
+  trace cs = selectInt >>= \n -> traceList cs n 0
 
 traceList
   :: forall a m z
   .  (Select m, Traceable z m a)
-  => Int -> (Trace [a] -> z) -> m [a]
-traceList n cs =
-  pure [] ?
-  liftA2 (:) (trace (cs . fa)) (traceList (n + 1) cs)
+  => (Trace [a] -> z) -> Int -> Int -> m [a]
+traceList cs n m | n <= m = pure []
+traceList cs n m =
+  liftA2 (:)
+    (trace (cs . fa))
+    (traceList cs n (m + 1))
   where
-    fa ta = TraceList $ \k -> k n ta
+    fa ta = TraceList $ \k -> k m ta
 
 instance (Applicative m, Newtype a, Retrace (Old a) ~ z)
   => Traceable z m (Metamorph a) where
