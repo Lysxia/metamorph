@@ -5,7 +5,9 @@
 {-# LANGUAGE DefaultSignatures #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE MagicHash #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE TypeApplications #-}
@@ -28,52 +30,63 @@ import Test.Metamorph.Internal
 -- | A list of variable names to represent function parameters.
 type Names = [String]
 
+data Mode = Detail | Shape
+
 defaultNames :: Names
 defaultNames = tail (fix (\f -> "" : liftA2 (flip (:)) f ['a' .. 'z']))
 
-pretty :: Pretty t => t -> String
-pretty t = prettyWith defaultNames 0 t ""
+pretty :: Pretty 'Detail t => t -> String
+pretty t = prettyDetail defaultNames 0 t ""
 
-instance Pretty (Metamorph a) => Show (Metamorph a) where
-  showsPrec = prettyWith defaultNames
+pretty_ :: Pretty 'Shape t => t -> String
+pretty_ t = prettyShape 0 t ""
 
-class Pretty t where
+prettyDetail :: Pretty 'Detail t => Names -> Int -> t -> ShowS
+prettyDetail = prettyWith @'Detail
+
+prettyShape :: Pretty 'Shape t => Int -> t -> ShowS
+prettyShape = prettyWith @'Shape []  -- Not used by Shape
+
+instance Pretty 'Detail (Metamorph a) => Show (Metamorph a) where
+  showsPrec = prettyDetail defaultNames
+
+class Pretty (mode :: Mode) t where
   prettyWith :: Names -> Int -> t -> ShowS
 
   default prettyWith
-    :: (Generic t, PrettyGeneric (Rep t))
+    :: (Generic t, PrettyGeneric mode (Rep t))
     => Names -> Int -> t -> ShowS
-  prettyWith vs n = prettyGeneric vs n . from
+  prettyWith vs n = prettyGeneric @mode vs n . from
 
-class PrettyGeneric f where
+class PrettyGeneric (mode :: Mode) f where
   prettyGeneric :: Names -> Int -> f p -> ShowS
 
 instance (Newtype a, PrettyRetrace (Retrace (Old a)))
-  => Pretty (Metamorph a) where
+  => Pretty Detail (Metamorph a) where
   prettyWith vs n (Metamorph a) = prettyRetrace (a ()) vs vs n
 
--- instance (PrettyTrace trace, PrettyRetrace retrace)
---   => Pretty (RetraceFun trace retrace) where
---   prettyWith a vs = prettyRetrace a vs vs
+instance Pretty 'Shape (Metamorph a) where
+  prettyWith _ _ _ = showString "_"
 
-instance Pretty a => Pretty (Maybe a) where
+instance Pretty mode a => Pretty mode (Maybe a) where
   prettyWith _ _ Nothing = showString "Nothing"
   prettyWith vs n (Just a) = showParen (n > appPrec) $
-    showString "Just " . prettyWith vs (appPrec + 1) a
+    showString "Just " . prettyWith @mode vs (appPrec + 1) a
     where
       appPrec = 10
 
-instance Pretty a => Pretty [a] where
+instance Pretty mode a => Pretty mode [a] where
   prettyWith vs _ as =
     showString "[" .
-    prettyCommaSep vs as .
+    prettyCommaSep @mode vs as .
     showString "]"
 
-prettyCommaSep :: Pretty a => Names -> [a] -> ShowS
+prettyCommaSep
+  :: forall mode a. Pretty mode a => Names -> [a] -> ShowS
 prettyCommaSep vs =
   foldr (.) id .
   intersperse (showString ",") .
-  fmap (prettyWith vs 0)
+  fmap (prettyWith @mode vs 0)
 
 -- * Showing Trace.
 
@@ -104,14 +117,14 @@ instance (KnownSymbol n, PrettyTrace a, PrettySum as)
     where appPrec = 10
 
 -- <trace> ((...) a)
-instance (Pretty a, PrettyTrace trace)
+instance (Pretty 'Detail a, PrettyTrace trace)
   => PrettyTrace (TraceFun a trace) where
   prettyTrace (TraceFun f) = f $ \a tb vs s ->
     prettyTrace tb vs $ \n ->
       showParen (n > appPrec) $
         s appPrec .
         showString " " .
-        prettyWith vs (appPrec + 1) a
+        prettyDetail vs (appPrec + 1) a
     where
       appPrec = 10
 
@@ -206,21 +219,21 @@ newExpr :: forall a. String -> Names -> Expr a
 newExpr f vs = Expr vs (\_ -> showString f)
 
 prettyMorphingWithExpr
-  :: (Morphing (Retrace a) Identity a, Pretty (Untrace a), RunExpr a)
+  :: (Morphing (Retrace a) Identity a, Pretty 'Detail (Untrace a), RunExpr a)
   => Expr a -> Untrace a -> String
 prettyMorphingWithExpr e@(Expr vs _) a =
-  s 0 . showString " = " . prettyWith vs 0 a $ ""
+  s 0 . showString " = " . prettyDetail vs 0 a $ ""
   where
     Expr _ s = runExpr e
 
 prettyMorphingWith
   :: forall a
-  .  (Morphing (Retrace a) Identity a, Pretty (Untrace a), RunExpr a)
+  .  (Morphing (Retrace a) Identity a, Pretty 'Detail (Untrace a), RunExpr a)
   => Names -> a -> String
 prettyMorphingWith (f : vs) a =
   prettyMorphingWithExpr @a (newExpr f vs) (morphingPure a)
 
 prettyMorphing
-  :: (Morphing (Retrace a) Identity a, Pretty (Untrace a), RunExpr a)
+  :: (Morphing (Retrace a) Identity a, Pretty 'Detail (Untrace a), RunExpr a)
   => String -> a -> String
 prettyMorphing f = prettyMorphingWith (f : filter (/= f) defaultNames)

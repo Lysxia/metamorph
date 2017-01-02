@@ -67,7 +67,7 @@ test_C = do
   putStrLn "Example C:"
   replicateM_ 5 $
     generate g_C >>= \((x,_), c) ->
-      putStrLn $ "  " ++ show x ++ " -> " ++ show c
+      putStrLn $ "  a@" ++ pretty_ x ++ " -> " ++ show c
   where
     g_C = morphing (f_C @C)
 
