@@ -43,8 +43,8 @@ prettyMorphing :: (...) => String -> monomorphizedType -> String
 prettyMorphing :: String -> (A -> (A -> A) -> A) -> String`
 ```
 
-    > putStrLn $ prettyMorphing "f" (f :: A -> (A -> A) -> A)
-    f a b = b (b (b a))
+    > prettyMorphing "f" (f :: A -> (A -> A) -> A)
+    "f a b = b (b (b a))"
 
 Random evaluation
 -----------------
