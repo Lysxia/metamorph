@@ -62,7 +62,7 @@ instance Traceable z IO a => Traceable z IO (IO a) where
 type instance Retrace (IO a) = RetraceSimple "IO" '[
   '("IO *", Retrace a)]
 
-type instance Untrace (IO a) = a
+type instance Codomain (IO a) = a
 
 instance MonadIO m => Morphing z m (IO a) where
   morphing' _ = fmap ((,) ()) . liftIO
@@ -111,5 +111,5 @@ instance Traceable z GenIO a => Traceable z GenIO (IO a) where
         let ap ta = TraceIO (\k -> k (Just n0) n ta)
         runGenIO_ (trace (cs . ap)) r0
 
-morphingIO :: Morphing (Retrace e) IO e => e -> IO (Untrace e)
+morphingIO :: Morphing (Retrace e) IO e => e -> IO (Codomain e)
 morphingIO = fmap snd . morphing

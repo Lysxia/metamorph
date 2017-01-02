@@ -174,7 +174,7 @@ instance PrettyRetrace retrace => PrettyRetrace (RetraceList retrace) where
 
 -- | Naming the left-hand side of a function
 class RunExpr a where
-  runExpr :: Expr a -> Expr (Untrace a)
+  runExpr :: Expr a -> Expr (Codomain a)
 
 instance RunExpr b => RunExpr (a -> b) where
   runExpr (Expr (v : vs) s) =
@@ -219,8 +219,8 @@ newExpr :: forall a. String -> Names -> Expr a
 newExpr f vs = Expr vs (\_ -> showString f)
 
 prettyMorphingWithExpr
-  :: (Morphing (Retrace a) Identity a, Pretty 'Detail (Untrace a), RunExpr a)
-  => Expr a -> Untrace a -> String
+  :: (Morphing (Retrace a) Identity a, Pretty 'Detail (Codomain a), RunExpr a)
+  => Expr a -> Codomain a -> String
 prettyMorphingWithExpr e@(Expr vs _) a =
   s 0 . showString " = " . prettyDetail vs 0 a $ ""
   where
@@ -228,12 +228,12 @@ prettyMorphingWithExpr e@(Expr vs _) a =
 
 prettyMorphingWith
   :: forall a
-  .  (Morphing (Retrace a) Identity a, Pretty 'Detail (Untrace a), RunExpr a)
+  .  (Morphing (Retrace a) Identity a, Pretty 'Detail (Codomain a), RunExpr a)
   => Names -> a -> String
 prettyMorphingWith (f : vs) a =
   prettyMorphingWithExpr @a (newExpr f vs) (morphingPure a)
 
 prettyMorphing
-  :: (Morphing (Retrace a) Identity a, Pretty 'Detail (Untrace a), RunExpr a)
+  :: (Morphing (Retrace a) Identity a, Pretty 'Detail (Codomain a), RunExpr a)
   => String -> a -> String
 prettyMorphing f = prettyMorphingWith (f : filter (/= f) defaultNames)

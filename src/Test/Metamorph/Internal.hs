@@ -327,35 +327,45 @@ instance (Newtype a, CoArbitrary (Retrace (Old a)))
   => CoArbitrary (Metamorph a) where
   coarbitrary (Metamorph a) = coarbitrary (a ())
 
--- * Untrace
+-- * Codomain
 
-type family Untrace a :: *
-type instance Untrace (a -> b) = Untrace b
-type instance Untrace () = ()
-type instance Untrace Bool = Bool
-type instance Untrace Integer = Integer
-type instance Untrace Int = Int
-type instance Untrace (a, b) = (a, b)
-type instance Untrace (Either a b) = Either a b
-type instance Untrace (Maybe a) = Maybe a
-type instance Untrace [a] = [a]
-type instance Untrace (Metamorph a) = Metamorph a
+-- | Codomain type of a function type.
+--
+-- @
+-- 'Codomain' (a -> b -> c) ~ c
+-- @
+type family Codomain a :: *
+type instance Codomain (a -> b) = Codomain b
+type instance Codomain () = ()
+type instance Codomain Bool = Bool
+type instance Codomain Integer = Integer
+type instance Codomain Int = Int
+type instance Codomain (a, b) = (a, b)
+type instance Codomain (Either a b) = Either a b
+type instance Codomain (Maybe a) = Maybe a
+type instance Codomain [a] = [a]
+type instance Codomain (Metamorph a) = Metamorph a
 
-type family Traced a :: *
-type instance Traced (a -> b) = (a, Traced b)
-type instance Traced (IO a) = ()
-type instance Traced () = ()
-type instance Traced Bool = ()
-type instance Traced Integer = ()
-type instance Traced Int = ()
-type instance Traced (a, b) = ()
-type instance Traced (Either a b) = ()
-type instance Traced (Maybe a) = ()
-type instance Traced [a] = ()
-type instance Traced (Metamorph a) = ()
+-- | Argument types of a function type.
+--
+-- @
+-- 'Domain' (a -> b -> c) ~ (a, (b, ()))
+-- @
+type family Domain a :: *
+type instance Domain (a -> b) = (a, Domain b)
+type instance Domain (IO a) = ()
+type instance Domain () = ()
+type instance Domain Bool = ()
+type instance Domain Integer = ()
+type instance Domain Int = ()
+type instance Domain (a, b) = ()
+type instance Domain (Either a b) = ()
+type instance Domain (Maybe a) = ()
+type instance Domain [a] = ()
+type instance Domain (Metamorph a) = ()
 
 class Applicative m => Morphing z m a where
-  morphing' :: (Retrace a -> z) -> a -> m (Traced a, Untrace a)
+  morphing' :: (Retrace a -> z) -> a -> m (Domain a, Codomain a)
 
 instance (Monad m, Traceable z m a, Morphing z m b)
   => Morphing z m (a -> b) where
@@ -399,19 +409,19 @@ instance Applicative m => Morphing z m (Metamorph a) where
 --
 -- If the function type is @forall a. F a@, you most likely want
 -- @e ~ F ('Metamorph' A')@.
-morphing :: Morphing (Retrace e) m e => e -> m (Traced e, Untrace e)
+morphing :: Morphing (Retrace e) m e => e -> m (Domain e, Codomain e)
 morphing = morphing' id
 
 -- | When a single evaluation is sufficient, @morphing@ may happen in
 -- @Identity@.
-morphingPure :: Morphing (Retrace e) Identity e => e -> Untrace e
+morphingPure :: Morphing (Retrace e) Identity e => e -> Codomain e
 morphingPure = snd . runIdentity . morphing
 
 -- | In general, inputs may be generated randomly.
 --
 -- For example, if @f :: forall a. [a] -> [a]@, the length of the input is a
 -- dimension to be generated, as @f@ may behave differently depending on it.
-morphingGen :: Morphing (Retrace e) Gen e => e -> Gen (Traced e, Untrace e)
+morphingGen :: Morphing (Retrace e) Gen e => e -> Gen (Domain e, Codomain e)
 morphingGen = morphing
 
 -- | A type class for unwrapping @newtype@ values.

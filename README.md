@@ -12,7 +12,10 @@ argument on the first one a fixed number of times. You can easily extract that
 number out of the function by instantiating `f` at the type of integers, and
 by applying it to `0` and `succ`.
 
-    > f 0 succ :: Integer
+```
+> f 0 succ :: Integer
+```
+
     3
 
 From the type of `f` and a single value, you can deduce that `f` just iterates
@@ -38,10 +41,13 @@ Functions of certain types, such as `forall a. a -> (a -> a) -> a`, are
 uniquely determined by the image of a single well chosen input. In that case,
 we can guess the definition of a polymorphic function with `prettyMorphing`:
 
-    prettyMorphing :: (...) => String -> monomorphizedType -> String
-    prettyMorphing :: String -> (A -> (A -> A) -> A) -> String`
+```
+prettyMorphing :: (...) => String -> monomorphizedType -> String
+prettyMorphing :: String -> (A -> (A -> A) -> A) -> String`
 
-    > prettyMorphing "f" (f :: A -> (A -> A) -> A)
+> prettyMorphing "f" (f :: A -> (A -> A) -> A)
+```
+
     "f a b = b (b (b a))"
 
 Random evaluation
@@ -54,16 +60,24 @@ functions can be generated!
 For any function type `F a` and an associated `A` constructed by `metamorph`:
 
 ```haskell
-morphingGen :: F A -> Test.QuickCheck.Gen A
+morphingGen :: F A -> Test.QuickCheck.Gen (Domain (F A), Codomain (F A))
 ```
 
-For example, if `F a = [a] -> [a]`,
+For example, if `F a = [a] -> [a]`, then `Domain (F A) ~ ([A], ())` and
+`Codomain (F A) ~ [A]`.
 
-    > generate (morphingGen (reverse :: [A] -> [A])) >>= print
-    [a !! 3,a !! 2,a !! 1,a !! 0]
+```
+> generate (morphingGen (reverse :: [A] -> [A])) >>= \((a, _), c) ->
+>   putStrLn $ "a@" ++ pretty_ a ++ " -> " ++ show c
+```
 
-Some list `a` was generated, and this shows that the image of `a` under
-`reverse` is another list containing the first four elements of `a` in reverse.
+    a@[_,_,_,_] -> [a !! 3,a !! 2,a !! 1,a !! 0]
+
+Some list `a` of length 4 was generated, and this shows that the image of `a` under
+`reverse` is indeed its reverse.
+
+We use `pretty_` instead of `show` to display the input list with minimal
+noise.
 
 Examples can be found under `test/`.
 
