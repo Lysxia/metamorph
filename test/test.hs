@@ -46,7 +46,7 @@ instance Newtype B' where
 
 test_B = do
   putStrLn "Example B"
-  putStrLn $ "  " ++ prettyMorphing "f_B" (f_B @B)
+  putStrLn $ "  " ++ prettyMorphing "f" (f_B @B)
 
 -- Example C
 
