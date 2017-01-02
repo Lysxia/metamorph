@@ -72,7 +72,7 @@ instance Select Gen where
   select = oneof
 
 class Traceable z m a where
-  trace :: (forall r. Trace a -> (z -> r) -> r) -> m a
+  trace :: (Trace a -> z) -> m a
 
 instance (Splittable m a, Traceable z m b)
   => Traceable z m (a -> b) where
@@ -113,7 +113,7 @@ instance (Select m, Traceable z m a)
 traceList
   :: forall a m z
   .  (Select m, Traceable z m a)
-  => Int -> (forall r. Trace [a] -> (z -> r) -> r) -> m [a]
+  => Int -> (Trace [a] -> z) -> m [a]
 traceList n cs =
   pure [] ?
   liftA2 (:) (trace (cs . fa)) (traceList (n + 1) cs)
@@ -122,7 +122,7 @@ traceList n cs =
 
 instance (Applicative m, Newtype a, Retrace (Old a) ~ z)
   => Traceable z m (Metamorph a) where
-  trace cs = pure (cs TraceEnd Metamorph)
+  trace cs = pure (Metamorph (cs . const TraceEnd))
 
 autotag :: forall n1 a1 n0 as. Autotag n1 a1 as => a1 -> TraceSimple n0 as
 autotag a = TraceSimple (autotag' @n1 a)
@@ -212,7 +212,9 @@ type instance Retrace (Metamorph a) = Void "Metamorph _"
 -- | A type of values which remember how they were constructed.
 --
 -- The argument @a@ of @'Metamorph' a@ must be an instance of 'Newtype'.
-newtype Metamorph a = Metamorph (Retrace (Old a))
+
+-- The definition as a constant function is a trick to improve sharing.
+newtype Metamorph a = Metamorph (() -> Retrace (Old a))
 
 instance (CoArbitrary trace, CoArbitrary retrace)
   => CoArbitrary (RetraceFun trace retrace) where
@@ -223,7 +225,7 @@ instance CoArbitrarySum as => CoArbitrary (RetraceSimple n0 as) where
 
 instance (Newtype a, CoArbitrary (Retrace (Old a)))
   => CoArbitrary (Metamorph a) where
-  coarbitrary (Metamorph a) = coarbitrary a
+  coarbitrary (Metamorph a) = coarbitrary (a ())
 
 -- * Untrace
 
@@ -245,7 +247,7 @@ class Applicative m => Morphing z m a where
 instance (Monad m, Traceable z m a, Morphing z m b)
   => Morphing z m (a -> b) where
   morphing' k f = do
-    a <- trace @z @m @a (\ta ret -> ret (k (RetraceFun $ \k _ -> k ta)))
+    a <- trace @z @m @a (\ta -> k (RetraceFun $ \k _ -> k ta))
     morphing' (k . \rtb -> RetraceFun $ \_ k -> k rtb) (f a)
 
 instance Applicative m => Morphing z m () where

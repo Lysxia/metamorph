@@ -50,7 +50,7 @@ class PrettyGeneric f where
 
 instance (Newtype a, PrettyRetrace (Retrace (Old a)))
   => Pretty (Metamorph a) where
-  prettyWith vs n (Metamorph a) = prettyRetrace a vs vs n
+  prettyWith vs n (Metamorph a) = prettyRetrace (a ()) vs vs n
 
 -- instance (PrettyTrace trace, PrettyRetrace retrace)
 --   => Pretty (RetraceFun trace retrace) where
