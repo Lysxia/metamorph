@@ -90,11 +90,6 @@
 -- - 'Trace' and 'Retrace' are in fact defined as type synonym families, to
 --   (re)use generic implementations, parameterized by some type-level
 --   annotations.
---
--- - Algebraic data types are encoded in CPS because I thought it solved
---   a problem with sharing at some point, but it doesn't.
---   Maybe there is a performance gain for large generic types, but that isn't
---   implemented yet.
 
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE DataKinds #-}
@@ -114,39 +109,72 @@ import Control.Applicative
 import Data.Functor.Identity
 import Data.List (stripPrefix)
 import GHC.Exts (Constraint)
+import GHC.Stack (HasCallStack)
 import GHC.TypeLits
 import Test.QuickCheck
 import Test.QuickCheck.Gen (Gen(..))
 
-import Test.Metamorph.Generic
+-- | Argument types of a function type.
+--
+-- @
+-- 'Dual' (a -> b -> c) ~ (a, (b, ()))
+-- @
+type family Dual a :: *
+type instance Dual (a -> b) = (a, Dual b)
+type instance Dual (IO a) = ()
+type instance Dual (a, b) = a -> Dual b
+type instance Dual (Either a b) = Either (Dual a) (Dual b)
+type instance Dual (Maybe a) = Maybe (Dual a)
+type instance Dual [a] = Maybe (Int, Dual a)
+type instance Dual (Metamorph a) = ()
+type instance Dual () = ()
+type instance Dual Bool = ()
+type instance Dual Integer = ()
+type instance Dual Int = ()
 
-newtype TraceSimple (n0 :: Symbol) (as :: [(Symbol, *)])
-  = TraceSimple (forall r. Sum' r as)
+newtype TraceOf t a = TraceOf a
+newtype TField (n :: Symbol) t = TField t
 
-newtype TraceFun a trace
-  = TraceFun (forall r. ProductCont r '[ a, trace ] -> r)
+data a :+: b = L a | R b
+  deriving (Eq, Ord, Show)
 
-newtype TraceList trace
-  = TraceList (forall r. ProductCont r '[ Int, trace ] -> r)
+infixr 4 :+:
+
+data Void
+
+instance Eq Void where (==) = absurd
+instance Ord Void where compare = absurd
+instance Show Void where show = absurd
+
+absurd :: HasCallStack => Void -> a
+absurd _ = error "Void"
+
+data TraceFun a trace = TraceFun a trace
+  deriving (Eq, Ord, Show)
+
+data TraceList trace = TraceList Int trace
+  deriving (Eq, Ord, Show)
 
 data TraceEnd = TraceEnd
   deriving (Eq, Ord, Show)
 
-type family Trace a :: *
-type instance Trace (a -> b) = TraceFun a (Trace b)
-type instance Trace () = TraceSimple "()" '[]
-type instance Trace Bool = TraceSimple "Bool" '[]
-type instance Trace Integer = TraceSimple "Integer" '[]
-type instance Trace Int = TraceSimple "Int" '[]
-type instance Trace (a, b) = TraceSimple "(,)" '[
-  '("fst", Trace a),
-  '("snd", Trace b)]
-type instance Trace (Either a b) = TraceSimple "Either" '[
-  '("fromLeft", Trace a),
-  '("fromRight", Trace b)]
-type instance Trace (Maybe a) = TraceSimple "Maybe" '[ '("fromJust", Trace a) ]
-type instance Trace [a] = TraceList (Trace a)
-type instance Trace (Metamorph a) = TraceEnd
+type Trace a = TraceOf a (Trace' a)
+
+type family Trace' a :: *
+type instance Trace' (a -> b) = TraceFun a (Trace b)
+type instance Trace' () = Void
+type instance Trace' Bool = Void
+type instance Trace' Integer = Void
+type instance Trace' Int = Void
+type instance Trace' (a, b) =
+  TField "fst" (Trace a) :+:
+  TField "snd" (Trace b)
+type instance Trace' (Either a b) =
+  TField "fromLeft" (Trace a) :+:
+  TField "fromRight" (Trace b)
+type instance Trace' (Maybe a) = TField "fromJust" (Trace a)
+type instance Trace' [a] = TraceList (Trace a)
+type instance Trace' (Metamorph a) = TraceEnd
 
 -- * Generating values.
 
@@ -174,9 +202,7 @@ class Traceable z m a where
 
 instance (Splittable m a, Traceable z m b)
   => Traceable z m (a -> b) where
-  trace cs = split (\a -> trace (cs . ap a))
-    where
-      ap a tb = TraceFun (\k -> k a tb)
+  trace cs = split (\a -> trace (cs . TraceOf . TraceFun a))
 
 instance Applicative m => Traceable z m () where
   trace _ = pure ()
@@ -215,99 +241,51 @@ traceList
 traceList cs n m | n <= m = pure []
 traceList cs n m =
   liftA2 (:)
-    (trace (cs . fa))
+    (trace (cs . TraceOf . TraceList m))
     (traceList cs n (m + 1))
-  where
-    fa ta = TraceList $ \k -> k m ta
 
 instance (Applicative m, Newtype a, Retrace (Old a) ~ z)
   => Traceable z m (Metamorph a) where
-  trace cs = pure (Metamorph (cs . const TraceEnd))
+  trace cs = pure (Metamorph (cs . TraceOf . const TraceEnd))
 
-autotag :: forall n1 a1 n0 as. Autotag n1 a1 as => a1 -> TraceSimple n0 as
-autotag a = TraceSimple (autotag' @n1 a)
-
-class TagReturn as where
-  tagReturn' :: r -> Sum' r as
-
-instance TagReturn '[] where
-  tagReturn' = TagEmpty
-
-instance TagReturn as => TagReturn ('(n, a) ': as) where
-  tagReturn' = TagPlus . const . tagReturn'
+autotag :: forall n1 a1 t as. Autotag n1 a1 as => a1 -> TraceOf t as
+autotag a = TraceOf (autotag' @n1 a)
 
 class Autotag (n1 :: Symbol) a1 as where
-  autotag' :: a1 -> Sum' r as
+  autotag' :: a1 -> as
 
-instance Autotag n1 a1 as => Autotag n1 a1 ('(n, a) ': as) where
-  autotag' a = TagPlus $ \_ -> autotag' @n1 a
+instance Autotag n1 a1 as => Autotag n1 a1 (a :+: as) where
+  autotag' a = R (autotag' @n1 a)
 
-instance {-# OVERLAPPING #-} (TagReturn as, a1 ~ a) => Autotag n1 a1 ('(n1, a) ': as) where
-  autotag' a = TagPlus $ \k -> tagReturn' (k a)
+instance {-# OVERLAPPING #-} a1 ~ a => Autotag n1 a1 (TField n1 a :+: as) where
+  autotag' a = L (TField a)
+
+instance a1 ~ a => Autotag n1 a1 (TField n1 a) where
+  autotag' = TField
 
 -- * Coarbitrary
 
-instance CoArbitrarySum as => CoArbitrary (TraceSimple name as) where
-  coarbitrary (TraceSimple f) = coarbitrarySum 0 f
+instance CoArbitrary as => CoArbitrary (TraceOf t as) where
+  coarbitrary (TraceOf f) = coarbitrary f
 
-class CoArbitrarySum as where
-  coarbitrarySum :: Int -> Sum' (Gen b -> Gen b) as -> Gen b -> Gen b
+instance CoArbitrary Void where
+  coarbitrary = absurd
 
-instance CoArbitrarySum '[] where
-  coarbitrarySum _ (TagEmpty vary) = vary
-
-instance (CoArbitrary a, CoArbitrarySum as)
-  => CoArbitrarySum ('(n, a) ': as) where
-  coarbitrarySum n (TagPlus f) =
-    coarbitrarySum (n + 1)
-      (f (\a -> variant n . coarbitrary a))
+instance (CoArbitrary a, CoArbitrary b)
+  => CoArbitrary (a :+: b) where
+  coarbitrary (L a) = variant 0 . coarbitrary a
+  coarbitrary (R b) = variant 1 . coarbitrary b
 
 instance (CoArbitrary a, CoArbitrary trace)
   => CoArbitrary (TraceFun a trace) where
-  coarbitrary (TraceFun f) = f . cap @'[a, trace]
-
-class CoArbitraryProduct as where
-  cap :: Gen b -> ProductCont (Gen b) as
-
-instance CoArbitraryProduct '[] where
-  cap = id
-
-instance (CoArbitrary a, CoArbitraryProduct as)
-  => CoArbitraryProduct (a ': as) where
-  cap g a = cap @as (coarbitrary a g)
+  coarbitrary (TraceFun a trace) = coarbitrary a . coarbitrary trace
 
 instance CoArbitrary TraceEnd where
   coarbitrary _ = id
 
 -- * Retrace
 
-newtype RetraceSimple (n0 :: Symbol) (as :: [(Symbol, *)])
-  = RetraceSimple (forall r. Sum' r as)
-
-type Void (n0 :: Symbol) = RetraceSimple n0 '[]
-
-newtype RetraceFun trace retrace
-  = RetraceFun (forall r. Sum r '[ trace, retrace ])
-
-newtype RetraceList retrace
-  = RetraceList (forall r. ProductCont r '[ Int, retrace ] -> r)
-
-type family Retrace a :: *
-type instance Retrace (a -> b) = RetraceFun (Trace a) (Retrace b)
-type instance Retrace () = Void "()"
-type instance Retrace Bool = Void "Bool"
-type instance Retrace Integer = Void "Integer"
-type instance Retrace Int = Void "Int"
-type instance Retrace (a, b) = RetraceSimple "(,)" '[
-  '("(*, _)", Retrace a),
-  '("(_, *)", Retrace b)]
-type instance Retrace (Either a b) = RetraceSimple "Either" '[
-  '("Either * _", Retrace a),
-  '("Either _ *", Retrace b)]
-type instance Retrace (Maybe a) = RetraceSimple "Maybe" '[
-  '("Maybe *", Retrace a)]
-type instance Retrace [a] = RetraceList (Retrace a)
-type instance Retrace (Metamorph a) = Void "Metamorph _"
+type Retrace a = Trace (Dual a)
 
 -- | A type of values which remember how they were constructed.
 --
@@ -315,13 +293,6 @@ type instance Retrace (Metamorph a) = Void "Metamorph _"
 
 -- The definition as a constant function is a trick to improve sharing.
 newtype Metamorph a = Metamorph (() -> Retrace (Old a))
-
-instance (CoArbitrary trace, CoArbitrary retrace)
-  => CoArbitrary (RetraceFun trace retrace) where
-  coarbitrary (RetraceFun f) = f coarbitrary coarbitrary
-
-instance CoArbitrarySum as => CoArbitrary (RetraceSimple n0 as) where
-  coarbitrary (RetraceSimple r) = coarbitrarySum 0 r
 
 instance (Newtype a, CoArbitrary (Retrace (Old a)))
   => CoArbitrary (Metamorph a) where
@@ -370,8 +341,8 @@ class Applicative m => Morphing z m a where
 instance (Monad m, Traceable z m a, Morphing z m b)
   => Morphing z m (a -> b) where
   morphing' k f = do
-    a <- trace @z @m @a (\ta -> k (RetraceFun $ \k _ -> k ta))
-    (args, r) <- morphing' (k . \rtb -> RetraceFun $ \_ k -> k rtb) (f a)
+    a <- trace @z @m @a (k . TraceOf . L . TField)
+    (args, r) <- morphing' (k . TraceOf . R . TField) (f a)
     pure ((a, args), r)
 
 pure' :: Applicative m => t -> a -> m ((), a)

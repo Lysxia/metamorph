@@ -45,22 +45,18 @@ import Test.Metamorph.Pretty
 incr :: IORef Int -> IO Int
 incr r = modifyIORef' r (+ 1) >> readIORef r
 
-newtype TraceIO trace
-  = TraceIO (forall r. ProductCont r '[ Maybe Int, Int, trace ] -> r)
+data TraceIO trace
+  = TraceIO (Maybe Int) Int trace
+  deriving (Eq, Ord, Show)
 
-type instance Trace (IO a) = TraceIO (Trace a)
+type instance Trace' (IO a) = TraceIO (Trace a)
 
 instance Traceable z IO a => Traceable z IO (IO a) where
   trace cs = do
     r <- newIORef 0
     pure $ do
       n <- incr r
-      trace (cs . ap n)
-    where
-      ap n ta = TraceIO (\k -> k Nothing n ta)
-
-type instance Retrace (IO a) = RetraceSimple "IO" '[
-  '("IO *", Retrace a)]
+      trace (cs . TraceOf . TraceIO Nothing n)
 
 type instance Codomain (IO a) = a
 
@@ -68,7 +64,7 @@ instance MonadIO m => Morphing z m (IO a) where
   morphing' _ = fmap ((,) ()) . liftIO
 
 instance PrettyTrace trace => PrettyTrace (TraceIO trace) where
-  prettyTrace (TraceIO f) = f $ \i j tb vs s ->
+  prettyTrace (TraceIO i j tb) vs s =
     prettyTrace tb vs $ \n ->
       showParen (n > appPrec) $
         showString ("runIO<" ++ show' i ++ show j ++ "> ") .
@@ -108,8 +104,7 @@ instance Traceable z GenIO a => Traceable z GenIO (IO a) where
       pure $ do
         n0 <- incr r0
         n <- incr r
-        let ap ta = TraceIO (\k -> k (Just n0) n ta)
-        runGenIO_ (trace (cs . ap)) r0
+        runGenIO_ (trace (cs . TraceOf . TraceIO (Just n0) n)) r0
 
 morphingIO :: Morphing (Retrace e) IO e => e -> IO (Codomain e)
 morphingIO = fmap snd . morphing

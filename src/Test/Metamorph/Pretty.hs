@@ -20,11 +20,10 @@ import Data.Function (fix)
 import Data.Functor.Identity
 import Data.List (intersperse)
 import GHC.Exts (proxy#)
-import GHC.Generics
+import GHC.Generics (Generic(..))
 import GHC.TypeLits
 import Text.Show
 
-import Test.Metamorph.Generic
 import Test.Metamorph.Internal
 
 -- | A list of variable names to represent function parameters.
@@ -61,9 +60,9 @@ class Pretty (mode :: Mode) t where
 class PrettyGeneric (mode :: Mode) f where
   prettyGeneric :: Names -> Int -> f p -> ShowS
 
-instance (Newtype a, PrettyRetrace (Retrace (Old a)))
+instance (Newtype a, PrettyRetrace (Old a))
   => Pretty Detail (Metamorph a) where
-  prettyWith vs n (Metamorph a) = prettyRetrace (a ()) vs vs n
+  prettyWith vs n (Metamorph a) = prettyRetrace @(Old a) (a ()) vs vs n
 
 instance Pretty 'Shape (Metamorph a) where
   prettyWith _ _ _ = showString "_"
@@ -93,33 +92,31 @@ prettyCommaSep vs =
 class PrettyTrace t where
   prettyTrace :: t -> Names -> (Int -> ShowS) -> Int -> ShowS
 
-class PrettySum as where
-  prettySum
-    :: Sum' (Names -> (Int -> ShowS) -> Int -> ShowS) as
-    -> Names -> (Int -> ShowS) -> Int -> ShowS
+instance (PrettyTrace a, PrettyTrace b) => PrettyTrace (a :+: b) where
+  prettyTrace (L a) = prettyTrace a
+  prettyTrace (R b) = prettyTrace b
 
-instance PrettySum as
-  => PrettyTrace (TraceSimple n0 as) where
-  prettyTrace (TraceSimple t) = prettySum t
+instance PrettyTrace Void where
+  prettyTrace = absurd
 
-instance PrettySum '[] where
-  prettySum (TagEmpty s) = s
+instance PrettyTrace a => PrettyTrace (TraceOf n a) where
+  prettyTrace (TraceOf a) = prettyTrace a
 
 -- <trace> (unCons (...))
-instance (KnownSymbol n, PrettyTrace a, PrettySum as)
-  => PrettySum ('(n, a) ': as) where
-  prettySum (TagPlus f) = prettySum . f $ \ta vs s ->
-    prettyTrace ta vs $ \n ->
+instance (KnownSymbol n, PrettyTrace a) => PrettyTrace (TField n a) where
+  prettyTrace (TField a) vs s =
+    prettyTrace a vs $ \n ->
       showParen (n > appPrec) $
         showString (symbolVal' @n proxy#) .
         showString " " .
         s (appPrec + 1)
-    where appPrec = 10
+    where
+      appPrec = 10
 
 -- <trace> ((...) a)
 instance (Pretty 'Detail a, PrettyTrace trace)
   => PrettyTrace (TraceFun a trace) where
-  prettyTrace (TraceFun f) = f $ \a tb vs s ->
+  prettyTrace (TraceFun a tb) vs s =
     prettyTrace tb vs $ \n ->
       showParen (n > appPrec) $
         s appPrec .
@@ -131,7 +128,7 @@ instance (Pretty 'Detail a, PrettyTrace trace)
 -- <trace> ((...) !! n)
 instance PrettyTrace trace
   => PrettyTrace (TraceList trace) where
-  prettyTrace (TraceList f) = f $ \i ta vs s ->
+  prettyTrace (TraceList i ta) vs s =
     prettyTrace ta vs $ \n -> showParen (n > ixPrec) $
       s (ixPrec + 1) .
       showString " !! " .
@@ -145,32 +142,44 @@ instance PrettyTrace TraceEnd where
 -- * Showing Retrace
 
 class PrettyRetrace t where
-  prettyRetrace :: t -> Names -> Names -> Int -> ShowS
+  prettyRetrace :: Retrace t -> Names -> Names -> Int -> ShowS
 
-instance (PrettyTrace trace, PrettyRetrace retrace)
-  => PrettyRetrace (RetraceFun trace retrace) where
-  prettyRetrace (RetraceFun f) allVs (v : vs) = f
-    (\t -> prettyTrace t allVs (\_ -> showString v))
-    (\rt -> prettyRetrace rt allVs vs)
+instance (PrettyTrace (Trace' a), PrettyRetrace b)
+  => PrettyRetrace (a -> b) where
+  prettyRetrace (TraceOf (L (TField ta))) allVs (v : _) = 
+    prettyTrace ta allVs (\_ -> showString v)
+  prettyRetrace (TraceOf (R (TField rtb))) allVs (_ : vs) = 
+    prettyRetrace @b rtb allVs vs
 
-class PrettyRetraceSum as where
-  prettyRetraceSum
-    :: Sum' (Names -> Names -> Int -> ShowS) as
-    -> Names -> Names -> Int -> ShowS
+instance PrettyRetrace (IO a) where
+  prettyRetrace _ = error "Unimplemented"
 
-instance PrettyRetraceSum '[] where
-  prettyRetraceSum (TagEmpty r) = r
+instance PrettyRetrace (a, b) where
+  prettyRetrace _ = error "Unimplemented"
 
-instance (PrettyRetrace a, PrettyRetraceSum as)
-  => PrettyRetraceSum ('(n, a) ': as) where
-  prettyRetraceSum (TagPlus f) = prettyRetraceSum (f prettyRetrace)
+instance PrettyRetrace (Either a b) where
+  prettyRetrace _ = error "Unimplemented"
 
-instance PrettyRetraceSum as => PrettyRetrace (RetraceSimple n0 as) where
-  prettyRetrace (RetraceSimple f) = prettyRetraceSum f
+instance PrettyRetrace (Maybe a) where
+  prettyRetrace _ = error "Unimplemented"
 
-instance PrettyRetrace retrace => PrettyRetrace (RetraceList retrace) where
-  prettyRetrace (RetraceList f) = f
-    (\_ rt -> prettyRetrace rt)
+instance PrettyRetrace [c] where
+  prettyRetrace _ = error "Unimplemented"
+
+instance PrettyRetrace (Metamorph a) where
+  prettyRetrace (TraceOf void) = absurd void
+
+instance PrettyRetrace () where
+  prettyRetrace (TraceOf void) = absurd void
+
+instance PrettyRetrace Bool where
+  prettyRetrace (TraceOf void) = absurd void
+
+instance PrettyRetrace Integer where
+  prettyRetrace (TraceOf void) = absurd void
+
+instance PrettyRetrace Int where
+  prettyRetrace (TraceOf void) = absurd void
 
 -- | Naming the left-hand side of a function
 class RunExpr a where
