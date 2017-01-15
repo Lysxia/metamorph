@@ -8,6 +8,12 @@ module Test.Metamorph
   , module Test.Metamorph.Pretty
   , GenIO
   , runGenIO
+  -- * Generics
+  , TraceOf
+  , Traceable(..)
+  , GTraceOf
+  , genericTrace
+  , genericPrettyWith
   ) where
 
 import Test.Metamorph.Generic
