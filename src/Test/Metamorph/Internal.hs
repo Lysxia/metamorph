@@ -118,36 +118,42 @@ import Test.QuickCheck.Gen (Gen(..))
 
 -- | @'Trace' a@ is the sum of ways to obtain a "leaf" of type @Metamorph b@
 -- from values of type @a@.
-type family Trace a :: *
+--
+-- 'Trace' can be recursive,
+-- hence it is a @newtype@ to make the type checker happy.
+newtype Trace a = Trace (TraceOf a)
+
+-- | Unwrapped 'Trace'.
+type family TraceOf a :: *
 
 -- "Concrete types" like '()', 'Bool', 'Integer' contain no leaves,
 -- so they have an empty trace type.
-type instance Trace () = Void
-type instance Trace Bool = Void
-type instance Trace Integer = Void
-type instance Trace Int = Void
+type instance TraceOf () = Void
+type instance TraceOf Bool = Void
+type instance TraceOf Integer = Void
+type instance TraceOf Int = Void
 
 -- | To get a something out of a function, we must first apply it to some
 -- argument.
-type instance Trace (a -> b) = TraceFun a (Trace b)
+type instance TraceOf (a -> b) = TraceFun a (Trace b)
 
 -- | In a product type, leaves can be found either component.
-type instance Trace (a, b) =
+type instance TraceOf (a, b) =
   TField "fst" (Trace a) :+:
   TField "snd" (Trace b)
 
 -- | In a sum type, we just recurse into whichever alternative we
 -- are given.
-type instance Trace (Either a b) =
+type instance TraceOf (Either a b) =
   TField "fromLeft" (Trace a) :+:
   TField "fromRight" (Trace b)
-type instance Trace (Maybe a) = TField "fromJust" (Trace a)
+type instance TraceOf (Maybe a) = TField "fromJust" (Trace a)
 
 -- | An optimized representation for lists.
-type instance Trace [a] = TraceList (Trace a)
+type instance TraceOf [a] = TraceList (Trace a)
 
 -- | There is a single trivial way to get a leaf out of itself.
-type instance Trace (Metamorph a) = TraceEnd
+type instance TraceOf (Metamorph a) = TraceEnd
 
 -- ** Trace components
 
@@ -228,25 +234,30 @@ instance Traceable z Gen Int where
 
 instance (Splittable m a, Traceable z m b)
   => Traceable z m (a -> b) where
-  trace cs = split (\a -> trace (cs . TraceFun a))
+  trace cs = split (\a -> trace (cs .+ TraceFun a))
 
 instance (Applicative m, Traceable z m a, Traceable z m b)
   => Traceable z m (a, b) where
-  trace cs = liftA2 (,) (trace (cs . autotag @"fst")) (trace (cs . autotag @"snd"))
+  trace cs = liftA2 (,) (trace (cs .+ autotag @"fst")) (trace (cs .+ autotag @"snd"))
 
 instance (Select m, Traceable z m a, Traceable z m b)
   => Traceable z m (Either a b) where
   trace cs =
-    Left <$> trace (cs . autotag @"fromLeft") ?
-    Right <$> trace (cs . autotag @"fromRight")
+    Left <$> trace (cs .+ autotag @"fromLeft") ?
+    Right <$> trace (cs .+ autotag @"fromRight")
 
 instance (Select m, Traceable z m a)
   => Traceable z m (Maybe a) where
-  trace cs = pure Nothing ? Just <$> trace (cs . autotag @"fromJust")
+  trace cs = pure Nothing ? Just <$> trace (cs .+ autotag @"fromJust")
 
 instance (Monad m, Select m, Traceable z m a)
   => Traceable z m [a] where
   trace cs = selectInt >>= \n -> traceList cs n 0
+
+(.+) :: (Trace a -> z) -> (y -> TraceOf a) -> y -> z
+cs .+ t = cs . Trace . t
+
+infixl 8 .+
 
 traceList
   :: forall a m z
@@ -255,12 +266,12 @@ traceList
 traceList cs n m | n <= m = pure []
 traceList cs n m =
   liftA2 (:)
-    (trace (cs . TraceList m))
+    (trace (cs .+ TraceList m))
     (traceList cs n (m + 1))
 
 instance (Applicative m, Newtype a, Retrace (Old a) ~ z)
   => Traceable z m (Metamorph a) where
-  trace cs = pure (Metamorph (cs . const TraceEnd))
+  trace cs = pure (Metamorph (cs .+ const TraceEnd))
 
 -- | Contexts with non-deterministic choices.
 --
@@ -388,8 +399,8 @@ class Applicative m => Morphing z m a where
 instance (Monad m, Traceable z m a, Morphing z m b)
   => Morphing z m (a -> b) where
   morphing' k f = do
-    a <- trace @z @m @a (k . L . TField)
-    (args, r) <- morphing' (k . R . TField) (f a)
+    a <- trace @z @m @a (k .+ L . TField)
+    (args, r) <- morphing' (k .+ R . TField) (f a)
     pure ((a, args), r)
 
 pure' :: Applicative m => t -> a -> m ((), a)

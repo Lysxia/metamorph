@@ -49,14 +49,14 @@ data TraceIO trace
   = TraceIO (Maybe Int) Int trace
   deriving (Eq, Ord, Show)
 
-type instance Trace (IO a) = TraceIO (Trace a)
+type instance TraceOf (IO a) = TraceIO (Trace a)
 
 instance Traceable z IO a => Traceable z IO (IO a) where
   trace cs = do
     r <- newIORef 0
     pure $ do
       n <- incr r
-      trace (cs . TraceIO Nothing n)
+      trace (cs .+ TraceIO Nothing n)
 
 type instance Codomain (IO a) = a
 
@@ -104,7 +104,7 @@ instance Traceable z GenIO a => Traceable z GenIO (IO a) where
       pure $ do
         n0 <- incr r0
         n <- incr r
-        runGenIO_ (trace (cs . TraceIO (Just n0) n)) r0
+        runGenIO_ (trace (cs .+ TraceIO (Just n0) n)) r0
 
 morphingIO :: Morphing (Retrace e) IO e => e -> IO (Codomain e)
 morphingIO = fmap snd . morphing

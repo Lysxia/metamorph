@@ -86,6 +86,9 @@ prettyCommaSep vs =
 class PrettyTrace t where
   prettyTrace :: t -> Names -> (Int -> ShowS) -> Int -> ShowS
 
+instance PrettyTrace (TraceOf a) => PrettyTrace (Trace a) where
+  prettyTrace (Trace a) = prettyTrace a
+
 instance (PrettyTrace a, PrettyTrace b) => PrettyTrace (a :+: b) where
   prettyTrace (L a) = prettyTrace a
   prettyTrace (R b) = prettyTrace b
@@ -137,9 +140,9 @@ class PrettyRetrace t where
 
 instance (PrettyTrace (Trace a), PrettyRetrace b)
   => PrettyRetrace (a -> b) where
-  prettyRetrace (L (TField ta)) allVs (v : _) = 
+  prettyRetrace (Trace (L (TField ta))) allVs (v : _) = 
     prettyTrace ta allVs (\_ -> showString v)
-  prettyRetrace (R (TField rtb)) allVs (_ : vs) = 
+  prettyRetrace (Trace (R (TField rtb))) allVs (_ : vs) = 
     prettyRetrace @b rtb allVs vs
 
 instance PrettyRetrace (IO a) where
@@ -158,19 +161,19 @@ instance PrettyRetrace [c] where
   prettyRetrace _ = error "Unimplemented"
 
 instance PrettyRetrace (Metamorph a) where
-  prettyRetrace void = absurd void
+  prettyRetrace (Trace void) = absurd void
 
 instance PrettyRetrace () where
-  prettyRetrace void = absurd void
+  prettyRetrace (Trace void) = absurd void
 
 instance PrettyRetrace Bool where
-  prettyRetrace void = absurd void
+  prettyRetrace (Trace void) = absurd void
 
 instance PrettyRetrace Integer where
-  prettyRetrace void = absurd void
+  prettyRetrace (Trace void) = absurd void
 
 instance PrettyRetrace Int where
-  prettyRetrace void = absurd void
+  prettyRetrace (Trace void) = absurd void
 
 -- | Naming the left-hand side of a function
 class RunExpr a where
