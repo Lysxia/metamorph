@@ -208,7 +208,7 @@ instance CoArbitrary TraceEnd where
 -- the trace through that value to themselves.
 
 -- | Generate a traced value @a@ in context @m@
--- (e.g., 'Identity', 'Gen', 'IO'), with final path type @z@.
+-- (e.g., 'Identity', 'Gen', 'IO'), with final trace type @z@.
 class Traceable z m a where
   trace :: (Trace a -> z) -> m a
 
@@ -331,20 +331,21 @@ type instance Dual Bool = ()
 type instance Dual Integer = ()
 type instance Dual Int = ()
 
--- | Type of values which remember how they were constructed.
+-- | Values which remember how they were constructed.
 --
--- The argument @a@ of @'Metamorph' a@ must be an instance of 'Newtype'.
-
--- The definition as a constant function is a trick to improve sharing.
+-- The argument type @a@ of @'Metamorph' a@ must be an instance of 'Newtype'.
 newtype Metamorph a = Metamorph (() -> Retrace (Old a))
+
+-- $trace-sharing The definition of 'Metamorph' as a constant function is a
+-- trick to improve sharing.
 
 instance (Newtype a, CoArbitrary (Retrace (Old a)))
   => CoArbitrary (Metamorph a) where
   coarbitrary (Metamorph a) = coarbitrary (a ())
 
--- * Codomain
+-- * Evaluation
 
--- | Codomain type of a function type.
+-- | Function result type.
 --
 -- @
 -- 'Codomain' (a -> b -> c) ~ c
@@ -361,7 +362,7 @@ type instance Codomain (Maybe a) = Maybe a
 type instance Codomain [a] = [a]
 type instance Codomain (Metamorph a) = Metamorph a
 
--- | Argument types of a function type.
+-- | Function argument types.
 --
 -- @
 -- 'Domain' (a -> b -> c) ~ (a, (b, ()))
@@ -378,8 +379,6 @@ type instance Domain (Either a b) = ()
 type instance Domain (Maybe a) = ()
 type instance Domain [a] = ()
 type instance Domain (Metamorph a) = ()
-
--- * Evaluation
 
 -- | Generate traced arguments in context @m@,
 -- and apply the given function @a@ to them.
