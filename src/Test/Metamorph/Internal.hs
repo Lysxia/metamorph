@@ -114,95 +114,105 @@ import GHC.TypeLits
 import Test.QuickCheck
 import Test.QuickCheck.Gen (Gen(..))
 
--- | Argument types of a function type.
---
--- @
--- 'Dual' (a -> b -> c) ~ (a, (b, ()))
--- @
-type family Dual a :: *
-type instance Dual (a -> b) = (a, Dual b)
-type instance Dual (IO a) = ()
-type instance Dual (a, b) = a -> Dual b
-type instance Dual (Either a b) = Either (Dual a) (Dual b)
-type instance Dual (Maybe a) = Maybe (Dual a)
-type instance Dual [a] = Maybe (Int, Dual a)
-type instance Dual (Metamorph a) = ()
-type instance Dual () = ()
-type instance Dual Bool = ()
-type instance Dual Integer = ()
-type instance Dual Int = ()
+-- * Traces
 
-newtype TraceOf t a = TraceOf a
+-- | @'Trace' a@ is the sum of ways to obtain a "leaf" of type @Metamorph b@
+-- from values of type @a@.
+type family Trace a :: *
+
+-- "Concrete types" like '()', 'Bool', 'Integer' contain no leaves,
+-- so they have an empty trace type.
+type instance Trace () = Void
+type instance Trace Bool = Void
+type instance Trace Integer = Void
+type instance Trace Int = Void
+
+-- | To get a something out of a function, we must first apply it to some
+-- argument.
+type instance Trace (a -> b) = TraceFun a (Trace b)
+
+-- | In a product type, leaves can be found either component.
+type instance Trace (a, b) =
+  TField "fst" (Trace a) :+:
+  TField "snd" (Trace b)
+
+-- | In a sum type, we just recurse into whichever alternative we
+-- are given.
+type instance Trace (Either a b) =
+  TField "fromLeft" (Trace a) :+:
+  TField "fromRight" (Trace b)
+type instance Trace (Maybe a) = TField "fromJust" (Trace a)
+
+-- | An optimized representation for lists.
+type instance Trace [a] = TraceList (Trace a)
+
+-- | There is a single trivial way to get a leaf out of itself.
+type instance Trace (Metamorph a) = TraceEnd
+
+-- ** Trace components
+
+-- | Trace through a field of some constructor.
 newtype TField (n :: Symbol) t = TField t
 
+-- | Trace through a function.
+data TraceFun a trace = TraceFun a trace
+  deriving (Eq, Ord, Show)
+
+-- | Trace through a list.
+data TraceList trace = TraceList Int trace
+  deriving (Eq, Ord, Show)
+
+-- | Trace end.
+data TraceEnd = TraceEnd
+  deriving (Eq, Ord, Show)
+
+-- ** Auxiliary types
+
+-- | A pretty-looking sum.
 data a :+: b = L a | R b
   deriving (Eq, Ord, Show)
 
 infixr 4 :+:
 
+-- | Empty type.
 data Void
 
 instance Eq Void where (==) = absurd
 instance Ord Void where compare = absurd
 instance Show Void where show = absurd
 
+-- | Ex falso quodlibet.
 absurd :: HasCallStack => Void -> a
 absurd _ = error "Void"
 
-data TraceFun a trace = TraceFun a trace
-  deriving (Eq, Ord, Show)
+-- Arbitrary instances.
 
-data TraceList trace = TraceList Int trace
-  deriving (Eq, Ord, Show)
+instance CoArbitrary Void where
+  coarbitrary = absurd
 
-data TraceEnd = TraceEnd
-  deriving (Eq, Ord, Show)
+instance (CoArbitrary a, CoArbitrary b)
+  => CoArbitrary (a :+: b) where
+  coarbitrary (L a) = variant 0 . coarbitrary a
+  coarbitrary (R b) = variant 1 . coarbitrary b
 
-type Trace a = TraceOf a (Trace' a)
+instance (CoArbitrary a, CoArbitrary trace)
+  => CoArbitrary (TraceFun a trace) where
+  coarbitrary (TraceFun a trace) = coarbitrary a . coarbitrary trace
 
-type family Trace' a :: *
-type instance Trace' (a -> b) = TraceFun a (Trace b)
-type instance Trace' () = Void
-type instance Trace' Bool = Void
-type instance Trace' Integer = Void
-type instance Trace' Int = Void
-type instance Trace' (a, b) =
-  TField "fst" (Trace a) :+:
-  TField "snd" (Trace b)
-type instance Trace' (Either a b) =
-  TField "fromLeft" (Trace a) :+:
-  TField "fromRight" (Trace b)
-type instance Trace' (Maybe a) = TField "fromJust" (Trace a)
-type instance Trace' [a] = TraceList (Trace a)
-type instance Trace' (Metamorph a) = TraceEnd
+instance CoArbitrary TraceEnd where
+  coarbitrary _ = id
 
--- * Generating values.
+-- * Traced values.
 
-class Applicative m => Select m where
-  (?) :: m a -> m a -> m a
-  selectInt :: m Int
+-- $traced We generate values @v@ whose leaves of type @Metamorph b@ contain
+-- the trace through that value to themselves.
 
-class Splittable m a where
-  split :: (a -> m b) -> m (a -> b)
-
-infixl 3 ?
-
-instance CoArbitrary a => Splittable Gen a where
-  split f = MkGen $ \g n a -> unGen (coarbitrary a (f a)) g n
-
-instance Splittable Identity a where
-  split f = pure (runIdentity . f)
-
-instance Select Gen where
-  ma ? mb = arbitrary >>= \b -> if b then ma else mb
-  selectInt = sized $ \n -> choose (0, n)
-
+-- | Generate a traced value @a@ in context @m@
+-- (e.g., 'Identity', 'Gen', 'IO'), with final path type @z@.
 class Traceable z m a where
   trace :: (Trace a -> z) -> m a
 
-instance (Splittable m a, Traceable z m b)
-  => Traceable z m (a -> b) where
-  trace cs = split (\a -> trace (cs . TraceOf . TraceFun a))
+-- Types with no leaf to trace just use default generators.
 
 instance Applicative m => Traceable z m () where
   trace _ = pure ()
@@ -215,6 +225,10 @@ instance Traceable z Gen Integer where
 
 instance Traceable z Gen Int where
   trace _ = arbitrary
+
+instance (Splittable m a, Traceable z m b)
+  => Traceable z m (a -> b) where
+  trace cs = split (\a -> trace (cs . TraceFun a))
 
 instance (Applicative m, Traceable z m a, Traceable z m b)
   => Traceable z m (a, b) where
@@ -241,53 +255,83 @@ traceList
 traceList cs n m | n <= m = pure []
 traceList cs n m =
   liftA2 (:)
-    (trace (cs . TraceOf . TraceList m))
+    (trace (cs . TraceList m))
     (traceList cs n (m + 1))
 
 instance (Applicative m, Newtype a, Retrace (Old a) ~ z)
   => Traceable z m (Metamorph a) where
-  trace cs = pure (Metamorph (cs . TraceOf . const TraceEnd))
+  trace cs = pure (Metamorph (cs . const TraceEnd))
 
-autotag :: forall n1 a1 t as. Autotag n1 a1 as => a1 -> TraceOf t as
-autotag a = TraceOf (autotag' @n1 a)
+-- | Contexts with non-deterministic choices.
+--
+-- This is weaker than 'Alternative' (no 'empty' action).
+class Applicative m => Select m where
+  -- | Choose between two alternatives.
+  (?) :: m a -> m a -> m a
+  -- | Choose an integer.
+  selectInt :: m Int
 
+infixl 3 ?
+
+instance Select Gen where
+  ma ? mb = arbitrary >>= \b -> if b then ma else mb
+  selectInt = sized $ \n -> choose (0, n)
+
+-- | Contexts which can commute with @(->) a@.
+class Splittable m a where
+  split :: (a -> m b) -> m (a -> b)
+
+instance CoArbitrary a => Splittable Gen a where
+  split f = MkGen $ \g n a -> unGen (coarbitrary a (f a)) g n
+
+instance Splittable Identity a where
+  split f = pure (runIdentity . f)
+
+-- ** Auxiliary type class
+
+-- | Wrap a value in a tagged sum given the corresponding tag.
 class Autotag (n1 :: Symbol) a1 as where
-  autotag' :: a1 -> as
+  autotag :: a1 -> as
 
 instance Autotag n1 a1 as => Autotag n1 a1 (a :+: as) where
-  autotag' a = R (autotag' @n1 a)
+  autotag a = R (autotag @n1 a)
 
 instance {-# OVERLAPPING #-} a1 ~ a => Autotag n1 a1 (TField n1 a :+: as) where
-  autotag' a = L (TField a)
+  autotag a = L (TField a)
 
 instance a1 ~ a => Autotag n1 a1 (TField n1 a) where
-  autotag' = TField
-
--- * Coarbitrary
-
-instance CoArbitrary as => CoArbitrary (TraceOf t as) where
-  coarbitrary (TraceOf f) = coarbitrary f
-
-instance CoArbitrary Void where
-  coarbitrary = absurd
-
-instance (CoArbitrary a, CoArbitrary b)
-  => CoArbitrary (a :+: b) where
-  coarbitrary (L a) = variant 0 . coarbitrary a
-  coarbitrary (R b) = variant 1 . coarbitrary b
-
-instance (CoArbitrary a, CoArbitrary trace)
-  => CoArbitrary (TraceFun a trace) where
-  coarbitrary (TraceFun a trace) = coarbitrary a . coarbitrary trace
-
-instance CoArbitrary TraceEnd where
-  coarbitrary _ = id
+  autotag = TField
 
 -- * Retrace
 
+-- | We generalize 'Trace' to multiple arguments of a function.
+--
+-- For a function type @a@, @'Retrace' a@ is the sum of ways to obtain a
+-- @'Metamorph' a@ from arguments of @a@.
 type Retrace a = Trace (Dual a)
 
--- | A type of values which remember how they were constructed.
+-- | Type of "environments" associated with any type.
+--
+-- For simple function types, this corresponds to the product of argument
+-- types.
+--
+-- @
+-- 'Dual' (a -> b -> c) ~ (a, (b, ()))
+-- @
+type family Dual a :: *
+type instance Dual (a -> b) = (a, Dual b)
+type instance Dual (IO a) = ()
+type instance Dual (a, b) = a -> Dual b
+type instance Dual (Either a b) = Either (Dual a) (Dual b)
+type instance Dual (Maybe a) = Maybe (Dual a)
+type instance Dual [a] = Maybe (Int, Dual a)
+type instance Dual (Metamorph a) = ()
+type instance Dual () = ()
+type instance Dual Bool = ()
+type instance Dual Integer = ()
+type instance Dual Int = ()
+
+-- | Type of values which remember how they were constructed.
 --
 -- The argument @a@ of @'Metamorph' a@ must be an instance of 'Newtype'.
 
@@ -335,14 +379,18 @@ type instance Domain (Maybe a) = ()
 type instance Domain [a] = ()
 type instance Domain (Metamorph a) = ()
 
+-- * Evaluation
+
+-- | Generate traced arguments in context @m@,
+-- and apply the given function @a@ to them.
 class Applicative m => Morphing z m a where
   morphing' :: (Retrace a -> z) -> a -> m (Domain a, Codomain a)
 
 instance (Monad m, Traceable z m a, Morphing z m b)
   => Morphing z m (a -> b) where
   morphing' k f = do
-    a <- trace @z @m @a (k . TraceOf . L . TField)
-    (args, r) <- morphing' (k . TraceOf . R . TField) (f a)
+    a <- trace @z @m @a (k . L . TField)
+    (args, r) <- morphing' (k . R . TField) (f a)
     pure ((a, args), r)
 
 pure' :: Applicative m => t -> a -> m ((), a)

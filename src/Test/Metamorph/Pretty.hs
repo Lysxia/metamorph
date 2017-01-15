@@ -1,8 +1,9 @@
 -- | Pretty printing symbolic values.
+--
+-- This module turns a 'Trace' into a Haskell expression of type @'Metamorph' a@.
 
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE DefaultSignatures #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE KindSignatures #-}
@@ -20,7 +21,6 @@ import Data.Function (fix)
 import Data.Functor.Identity
 import Data.List (intersperse)
 import GHC.Exts (proxy#)
-import GHC.Generics (Generic(..))
 import GHC.TypeLits
 import Text.Show
 
@@ -49,16 +49,10 @@ prettyShape = prettyWith @'Shape []  -- Not used by Shape
 instance Pretty 'Detail (Metamorph a) => Show (Metamorph a) where
   showsPrec = prettyDetail defaultNames
 
+-- | Conversion to 'String' parameterized by a list of variable names,
+-- used in the 'Detail' mode, and ignored in the 'Shape' mode.
 class Pretty (mode :: Mode) t where
   prettyWith :: Names -> Int -> t -> ShowS
-
-  default prettyWith
-    :: (Generic t, PrettyGeneric mode (Rep t))
-    => Names -> Int -> t -> ShowS
-  prettyWith vs n = prettyGeneric @mode vs n . from
-
-class PrettyGeneric (mode :: Mode) f where
-  prettyGeneric :: Names -> Int -> f p -> ShowS
 
 instance (Newtype a, PrettyRetrace (Old a))
   => Pretty Detail (Metamorph a) where
@@ -98,9 +92,6 @@ instance (PrettyTrace a, PrettyTrace b) => PrettyTrace (a :+: b) where
 
 instance PrettyTrace Void where
   prettyTrace = absurd
-
-instance PrettyTrace a => PrettyTrace (TraceOf n a) where
-  prettyTrace (TraceOf a) = prettyTrace a
 
 -- <trace> (unCons (...))
 instance (KnownSymbol n, PrettyTrace a) => PrettyTrace (TField n a) where
@@ -144,11 +135,11 @@ instance PrettyTrace TraceEnd where
 class PrettyRetrace t where
   prettyRetrace :: Retrace t -> Names -> Names -> Int -> ShowS
 
-instance (PrettyTrace (Trace' a), PrettyRetrace b)
+instance (PrettyTrace (Trace a), PrettyRetrace b)
   => PrettyRetrace (a -> b) where
-  prettyRetrace (TraceOf (L (TField ta))) allVs (v : _) = 
+  prettyRetrace (L (TField ta)) allVs (v : _) = 
     prettyTrace ta allVs (\_ -> showString v)
-  prettyRetrace (TraceOf (R (TField rtb))) allVs (_ : vs) = 
+  prettyRetrace (R (TField rtb)) allVs (_ : vs) = 
     prettyRetrace @b rtb allVs vs
 
 instance PrettyRetrace (IO a) where
@@ -167,19 +158,19 @@ instance PrettyRetrace [c] where
   prettyRetrace _ = error "Unimplemented"
 
 instance PrettyRetrace (Metamorph a) where
-  prettyRetrace (TraceOf void) = absurd void
+  prettyRetrace void = absurd void
 
 instance PrettyRetrace () where
-  prettyRetrace (TraceOf void) = absurd void
+  prettyRetrace void = absurd void
 
 instance PrettyRetrace Bool where
-  prettyRetrace (TraceOf void) = absurd void
+  prettyRetrace void = absurd void
 
 instance PrettyRetrace Integer where
-  prettyRetrace (TraceOf void) = absurd void
+  prettyRetrace void = absurd void
 
 instance PrettyRetrace Int where
-  prettyRetrace (TraceOf void) = absurd void
+  prettyRetrace void = absurd void
 
 -- | Naming the left-hand side of a function
 class RunExpr a where
