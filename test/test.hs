@@ -11,6 +11,13 @@ import Data.Functor.Identity
 import Test.QuickCheck
 import Test.Metamorph
 
+-- Assert that two strings are equal and print them.
+(=?) :: String -> String -> IO ()
+a =? b | a == b = putStrLn $ "  " ++ a
+a =? b = do
+  putStrLn $ "E<" ++ a
+  putStrLn $ "E>" ++ b
+
 -- Example A
 
 type F_A a = a -> (a -> a) -> a
@@ -27,8 +34,8 @@ instance Newtype A' where
 
 test_A = do
   putStrLn "Example A"
-  putStrLn $ "  " ++ show (morphingPure (f_A @A))
-  putStrLn $ "  " ++ prettyMorphing "f" (f_A @A)
+  show (morphingPure (f_A @A)) =? "b a"
+  prettyMorphing "f" (f_A @A)  =? "f a b = b a"
 
 -- Example B
 
@@ -46,7 +53,7 @@ instance Newtype B' where
 
 test_B = do
   putStrLn "Example B"
-  putStrLn $ "  " ++ prettyMorphing "f" (f_B @B)
+  prettyMorphing "f" (f_B @B) =? "f a = a (Just (a Nothing))"
 
 -- Example C
 
@@ -92,7 +99,7 @@ instance Newtype D' where
 test_D = do
   putStrLn "Example D:"
   d <- morphingIO (f_D @D)
-  putStrLn $ "  " ++ show d
+  show d =? "[runIO<3> a,runIO<1> a,runIO<2> a]"
 
 -- Example E: IO
 
@@ -115,8 +122,10 @@ instance Newtype E' where
 
 test_E = do
   putStrLn "Example E:"
-  (_, e) <- runGenIO (morphing (f_E @E))
-  putStrLn $ "  " ++ show e
+  e1 <- morphingIO (f_E @E)
+  show e1 =? "[runIO<1> a,runIO<2> a,runIO<1> b,runIO<2> b]"
+  (_, e2) <- runGenIO (morphing (f_E @E))
+  show e2 =? "[runIO<1,1> a,runIO<4,2> a,runIO<2,1> b,runIO<3,2> b]"
 
 main = do
   test_A
@@ -124,3 +133,4 @@ main = do
   test_C
   test_D
   test_E
+
