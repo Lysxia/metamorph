@@ -399,7 +399,7 @@ class Applicative m => Morphing z m a where
 instance (Monad m, Traceable z m a, Morphing z m b)
   => Morphing z m (a -> b) where
   morphing' k f = do
-    a <- trace @z @m @a (k .+ L . TField)
+    a <- trace (k .+ L . TField)
     (args, r) <- morphing' (k .+ R . TField) (f a)
     pure ((a, args), r)
 
