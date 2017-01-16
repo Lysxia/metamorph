@@ -29,8 +29,8 @@ genericTrace
      , Generic a
      , GTraceable z m (Rep a)
      , TraceOf a ~ GTraceOf (Rep a) )
-  => (Trace a -> z) -> m a
-genericTrace cs = to <$> gtrace (cs . Trace)
+  => WCons (WeightTree (Rep a)) () -> (Trace a -> z) -> m a
+genericTrace (WCons w n _) cs = to <$> gtrace (cs . Trace) (w, n)
 
 newtype GTField (n :: Symbol) (i :: Nat) (j :: Nat) a = GTField a
 
@@ -67,43 +67,100 @@ type family GProdLength (f :: * -> *) :: Nat where
   GProdLength U1 = 0
   GProdLength (K1 _ _) = 1
 
+type family WeightTree (f :: * -> *) :: * where
+  WeightTree (f :+: g) = WNode (WeightTree f) (WeightTree g)
+  WeightTree (M1 C ('MetaCons c _ _) f) = WLeaf c
+  WeightTree (M1 D _ f) = WeightTree f
+  WeightTree (M1 S _ f) = WeightTree f
+
+data WLeaf (c :: Symbol) = WLeaf
+data WNode a b = WNode !Int !a !b
+
+data WCons t r = WCons t !Int r
+
+newtype W (c :: Symbol) = W Int
+
+instance Num (W c) where
+  fromInteger = W . fromInteger
+  (+) = undefined
+  (-) = undefined
+  (*) = undefined
+  abs = undefined
+  signum = undefined
+
+class Spine t where
+  type Spineless t r :: *
+  type Tag t :: Symbol
+  (%) :: W (Tag t) -> Spineless t r -> WCons t r
+
+infixr 1 %
+
+instance Spine a => Spine (WNode a b) where
+  type Spineless (WNode a b) r = Spineless a (WCons b r)
+  type Tag (WNode a b) = Tag a
+  n % s = WCons (WNode m a b) q r
+    where
+      WCons a m (WCons b p r) = n % s
+      q = m + p
+
+instance Spine (WLeaf c) where
+  type Spineless (WLeaf c) r = r
+  type Tag (WLeaf c) = c
+  W n % r = WCons WLeaf n r
+
+uniformWeights :: UniformWeights a => WCons a ()
+uniformWeights = uncurry WCons uniformWeights' ()
+
+single :: WCons (WLeaf c) ()
+single = WCons WLeaf 1 ()
+
+class UniformWeights a where
+  uniformWeights' :: (a, Int)
+
+instance UniformWeights (WLeaf c) where
+  uniformWeights' = (WLeaf, 1)
+
+instance (UniformWeights a, UniformWeights b)
+  => UniformWeights (WNode a b) where
+  uniformWeights' = p `seq` (WNode m a b, p)
+    where
+      (a, m) = uniformWeights'
+      (b, n) = uniformWeights'
+      p = m + n
+
 class GTraceable z m f where
-  gtrace :: (GTraceOf f -> z) -> m (f p)
+  gtrace :: (GTraceOf f -> z) -> (WeightTree f, Int) -> m (f p)
 
 instance Applicative m => GTraceable z m U1 where
-  gtrace _ = pure U1
+  gtrace _ _ = pure U1
 
 instance (Functor m, GTraceable z m f) => GTraceable z m (M1 D c f) where
-  gtrace cs = M1 <$> gtrace cs
+  gtrace cs w = M1 <$> gtrace cs w
 
 instance (Functor m, GTraceable z m f) => GTraceable z m (M1 S c f) where
-  gtrace cs = M1 <$> gtrace cs
+  gtrace cs w = M1 <$> gtrace cs w
 
-instance (n ~ GSumLength (f :+: g), KnownNat n, GTraceableSum z Gen (f :+: g))
+instance (j ~ GProdLength f, Functor m, GTraceableProd c 1 j z m f)
+  => GTraceable z m (M1 C ('MetaCons c _i _s) f) where
+  gtrace cs _ = M1 <$> gtraceprod @c @1 @j cs
+
+instance GTraceableSum z Gen (f :+: g)
   => GTraceable z Gen (f :+: g) where
-  gtrace cs = choose (1, n) >>= gtracesum cs
-    where
-      n = fromInteger (natVal' @n proxy#)
+  gtrace cs (w, n) = choose (1, n) >>= gtracesum cs w
 
 class GTraceableSum z m f where
-  gtracesum :: (GTraceOf f -> z) -> Int -> m (f p)
+  gtracesum :: (GTraceOf f -> z) -> WeightTree f -> Int -> m (f p)
 
 instance
-  ( k ~ GSumLength f
-  , KnownNat k
-  , Functor m
-  , GTraceableSum z m f
-  , GTraceableSum z m g )
+  (Functor m, GTraceableSum z m f, GTraceableSum z m g)
   => GTraceableSum z m (f :+: g) where
-  gtracesum cs n
-    | n <= k = L1 <$> gtracesum (cs . Metamorph.L) n
-    | otherwise = R1 <$> gtracesum (cs . Metamorph.R) (n - k)
-    where
-      k = fromInteger (natVal' @k proxy#)
+  gtracesum cs (WNode k a b) n
+    | n <= k = L1 <$> gtracesum (cs . Metamorph.L) a n
+    | otherwise = R1 <$> gtracesum (cs . Metamorph.R) b (n - k)
 
 instance (j ~ GProdLength f, Functor m, GTraceableProd c 1 j z m f)
   => GTraceableSum z m (M1 C ('MetaCons c _i _s) f) where
-  gtracesum cs _ = M1 <$> gtraceprod @c @1 @j cs
+  gtracesum cs _ _ = M1 <$> gtraceprod @c @1 @j cs
 
 class GTraceableProd n i j z m f where
   gtraceprod :: (GTraceProd n i j f -> z) -> m (f p)

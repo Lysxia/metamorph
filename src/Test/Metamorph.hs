@@ -14,6 +14,10 @@ module Test.Metamorph
   , GTraceOf
   , genericTrace
   , genericPrettyWith
+  , (%)
+  , W
+  , single
+  , uniformWeights
   ) where
 
 import Test.Metamorph.Generic

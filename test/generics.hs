@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
@@ -24,7 +25,7 @@ instance Pretty mode a => Pretty mode (Three a) where
 type instance TraceOf (Three a) = GTraceOf (Rep (Three a))
 
 instance Traceable z Gen a => Traceable z Gen (Three a) where
-  trace = genericTrace
+  trace = genericTrace (1 % 2 % 3 % 4 % (5 :: W "Four") % ())
 
 type F a = Three a -> [a]
 
