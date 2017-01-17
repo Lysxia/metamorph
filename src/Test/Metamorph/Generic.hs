@@ -15,7 +15,8 @@
 module Test.Metamorph.Generic where
 
 import Control.Applicative (liftA2)
-import GHC.Exts (proxy#)
+import Data.Proxy (Proxy(..))
+import GHC.Exts (proxy#, TYPE)
 import GHC.Generics
 import GHC.TypeLits
 import Test.QuickCheck
@@ -25,12 +26,22 @@ import Test.Metamorph.Pretty
 import qualified Test.Metamorph.Internal as Metamorph
 
 genericTrace
-  :: ( Functor m
+  :: forall a m z w proxy
+  .  ( Functor m
      , Generic a
-     , GTraceable z m (Rep a)
+     , GTraceable w z m (Rep a)
      , TraceOf a ~ GTraceOf (Rep a) )
-  => WCons (WeightTree (Rep a)) () -> (Trace a -> z) -> m a
-genericTrace (WCons w n _) cs = to <$> gtrace (cs . Trace) (w, n)
+  => proxy '(a, w) -> (Trace a -> z) -> m a
+genericTrace _ cs = to <$> gtrace @w (cs . Trace)
+
+weights :: forall ns a. Generic a => Proxy '(a, WeightTree (Rep a) ns)
+weights = Proxy
+
+weights' :: forall ns a. Generic a => Proxy '(a, WeightTree' (Rep a) ns)
+weights' = Proxy
+
+uniform :: Generic a => Proxy '(a, UniformTree (Rep a))
+uniform = Proxy
 
 newtype GTField (n :: Symbol) (i :: Nat) (j :: Nat) a = GTField a
 
@@ -67,100 +78,83 @@ type family GProdLength (f :: * -> *) :: Nat where
   GProdLength U1 = 0
   GProdLength (K1 _ _) = 1
 
-type family WeightTree (f :: * -> *) :: * where
-  WeightTree (f :+: g) = WNode (WeightTree f) (WeightTree g)
-  WeightTree (M1 C ('MetaCons c _ _) f) = WLeaf c
-  WeightTree (M1 D _ f) = WeightTree f
-  WeightTree (M1 S _ f) = WeightTree f
+type WeightTree (f :: * -> *) (ls :: [*]) = TreeFst (WeightTree0 f ls)
+type WeightTree' (f :: * -> *) (ns :: [Nat]) = TreeFst (WeightTree0 f (Map N ns))
 
-data WLeaf (c :: Symbol) = WLeaf
-data WNode a b = WNode !Int !a !b
+type family Map (f :: k1 -> k2) (ns :: [k1]) :: [k2] where
+  Map f '[] = '[]
+  Map f (n ': ns) = f n ': Map f ns
 
-data WCons t r = WCons t !Int r
+type family TreeFst (tr :: (*, Nat, [*])) :: (*, Nat) where
+  TreeFst '(t, n, '[]) = '(t, n)
 
-newtype W (c :: Symbol) = W Int
+type family WeightTree0 (f :: * -> *) (ls :: [*]) :: (*, Nat, [*]) where
+  WeightTree0 (f :+: g) ls = WeightTreeCont (WeightTree0 f ls) g
+  WeightTree0 (M1 C ('MetaCons c _ _) f) (l ': ls) = '(WLeaf c, Weight c l, ls)
+  WeightTree0 (M1 D _ f) ls = WeightTree0 f ls
+  WeightTree0 (M1 S _ f) ls = WeightTree0 f ls
 
-instance Num (W c) where
-  fromInteger = W . fromInteger
-  (+) = undefined
-  (-) = undefined
-  (*) = undefined
-  abs = undefined
-  signum = undefined
+type family Weight (c :: Symbol) (l :: *) where
+  Weight c (n :%: c) = n
+  Weight _ (N n) = n
 
-class Spine t where
-  type Spineless t r :: *
-  type Tag t :: Symbol
-  (%) :: W (Tag t) -> Spineless t r -> WCons t r
+type family WeightTreeCont (tr :: (*, Nat, [*])) (f :: * -> *) :: (*, Nat, [*]) where
+  WeightTreeCont '(t, n, r) g = WeightTreeCont2 t n (WeightTree0 g r)
 
-infixr 1 %
+type family WeightTreeCont2 (t :: *) (n :: Nat) (tr :: (*, Nat, [*])) :: (*, Nat, [*]) where
+  WeightTreeCont2 a n '(b, m, r) = '((a :|: b) n, n + m, r)
 
-instance Spine a => Spine (WNode a b) where
-  type Spineless (WNode a b) r = Spineless a (WCons b r)
-  type Tag (WNode a b) = Tag a
-  n % s = WCons (WNode m a b) q r
+data (n :: Nat) :%: (c :: Symbol)
+data WLeaf (c :: Symbol)
+data N (n :: Nat)
+data (a :|: b) (n :: Nat)
+
+type family UniformTree (f :: * -> *) :: (*, Nat) where
+  UniformTree (f :+: g) = UniformTreeCont (UniformTree f) (UniformTree g)
+  UniformTree (M1 C ('MetaCons c _ _) f) = '(WLeaf c, 1)
+  UniformTree (M1 D _ f) = UniformTree f
+  UniformTree (M1 S _ f) = UniformTree f
+
+type family UniformTreeCont (am :: (*, Nat)) (bn :: (*, Nat)) :: (*, Nat) where
+  UniformTreeCont '(a, m) '(b, n) = '((a :|: b) m, m + n)
+
+class GTraceable (w :: (*, Nat)) z m f where
+  gtrace :: (GTraceOf f -> z) -> m (f p)
+
+instance Applicative m => GTraceable w z m U1 where
+  gtrace _ = pure U1
+
+instance (Functor m, GTraceable w z m f) => GTraceable w z m (M1 D c f) where
+  gtrace cs = M1 <$> gtrace @w cs
+
+instance (Functor m, GTraceable w z m f) => GTraceable w z m (M1 S c f) where
+  gtrace cs = M1 <$> gtrace @w cs
+
+instance (j ~ GProdLength f, c ~ c', Functor m, GTraceableProd c 1 j z m f)
+  => GTraceable '(WLeaf c', _n) z m (M1 C ('MetaCons c _i _s) f) where
+  gtrace cs = M1 <$> gtraceprod @c @1 @j cs
+
+instance (KnownNat n, GTraceableSum w z Gen (f :+: g))
+  => GTraceable '(w, n) z Gen (f :+: g) where
+  gtrace cs = choose (1, n) >>= gtracesum @w cs
     where
-      WCons a m (WCons b p r) = n % s
-      q = m + p
+      n = fromInteger (natVal' @n proxy#)
 
-instance Spine (WLeaf c) where
-  type Spineless (WLeaf c) r = r
-  type Tag (WLeaf c) = c
-  W n % r = WCons WLeaf n r
-
-uniformWeights :: UniformWeights a => WCons a ()
-uniformWeights = uncurry WCons uniformWeights' ()
-
-single :: WCons (WLeaf c) ()
-single = WCons WLeaf 1 ()
-
-class UniformWeights a where
-  uniformWeights' :: (a, Int)
-
-instance UniformWeights (WLeaf c) where
-  uniformWeights' = (WLeaf, 1)
-
-instance (UniformWeights a, UniformWeights b)
-  => UniformWeights (WNode a b) where
-  uniformWeights' = p `seq` (WNode m a b, p)
-    where
-      (a, m) = uniformWeights'
-      (b, n) = uniformWeights'
-      p = m + n
-
-class GTraceable z m f where
-  gtrace :: (GTraceOf f -> z) -> (WeightTree f, Int) -> m (f p)
-
-instance Applicative m => GTraceable z m U1 where
-  gtrace _ _ = pure U1
-
-instance (Functor m, GTraceable z m f) => GTraceable z m (M1 D c f) where
-  gtrace cs w = M1 <$> gtrace cs w
-
-instance (Functor m, GTraceable z m f) => GTraceable z m (M1 S c f) where
-  gtrace cs w = M1 <$> gtrace cs w
-
-instance (j ~ GProdLength f, Functor m, GTraceableProd c 1 j z m f)
-  => GTraceable z m (M1 C ('MetaCons c _i _s) f) where
-  gtrace cs _ = M1 <$> gtraceprod @c @1 @j cs
-
-instance GTraceableSum z Gen (f :+: g)
-  => GTraceable z Gen (f :+: g) where
-  gtrace cs (w, n) = choose (1, n) >>= gtracesum cs w
-
-class GTraceableSum z m f where
-  gtracesum :: (GTraceOf f -> z) -> WeightTree f -> Int -> m (f p)
+class GTraceableSum w z m f where
+  gtracesum :: (GTraceOf f -> z) -> Int -> m (f p)
 
 instance
-  (Functor m, GTraceableSum z m f, GTraceableSum z m g)
-  => GTraceableSum z m (f :+: g) where
-  gtracesum cs (WNode k a b) n
-    | n <= k = L1 <$> gtracesum (cs . Metamorph.L) a n
-    | otherwise = R1 <$> gtracesum (cs . Metamorph.R) b (n - k)
+  (KnownNat k, Functor m, GTraceableSum a z m f, GTraceableSum b z m g)
+  => GTraceableSum ((a :|: b) k) z m (f :+: g) where
+  gtracesum cs n
+    | n <= k = L1 <$> gtracesum @a (cs . Metamorph.L) n
+    | otherwise = R1 <$> gtracesum @b (cs . Metamorph.R) (n - k)
+    where
+      k = fromInteger (natVal' @k proxy#)
 
-instance (j ~ GProdLength f, Functor m, GTraceableProd c 1 j z m f)
-  => GTraceableSum z m (M1 C ('MetaCons c _i _s) f) where
-  gtracesum cs _ _ = M1 <$> gtraceprod @c @1 @j cs
+instance (j ~ GProdLength f, c ~ c', Functor m, GTraceableProd c 1 j z m f)
+  => GTraceableSum (WLeaf c') z m (M1 C ('MetaCons c _i _s) f) where
+  gtracesum cs _ = M1 <$> gtraceprod @c @1 @j cs
 
 class GTraceableProd n i j z m f where
   gtraceprod :: (GTraceProd n i j f -> z) -> m (f p)

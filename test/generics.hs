@@ -7,9 +7,11 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
 
 import Control.Monad (replicateM_)
+import Data.Proxy (Proxy(..))
 import GHC.Generics (Generic, Rep)
 import Test.QuickCheck
 import Test.Metamorph
@@ -25,7 +27,7 @@ instance Pretty mode a => Pretty mode (Three a) where
 type instance TraceOf (Three a) = GTraceOf (Rep (Three a))
 
 instance Traceable z Gen a => Traceable z Gen (Three a) where
-  trace = genericTrace (1 % 2 % 3 % 4 % (5 :: W "Four") % ())
+  trace = genericTrace (weights' @'[1, 2, 3, 4, 5])
 
 type F a = Three a -> [a]
 

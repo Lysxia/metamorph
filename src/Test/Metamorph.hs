@@ -13,11 +13,11 @@ module Test.Metamorph
   , Traceable(..)
   , GTraceOf
   , genericTrace
+  , weights
+  , weights'
+  , uniform
   , genericPrettyWith
-  , (%)
-  , W
-  , single
-  , uniformWeights
+  , (:%:)
   ) where
 
 import Test.Metamorph.Generic
